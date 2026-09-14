@@ -252,4 +252,5 @@ A structured, progressive curriculum for new graduates entering the Azure Cloud 
 ## Skill Files
 
 - [01-azure-basics.md](01-azure-basics.md) — Azure fundamentals detail
+- [01.4-azure-cli-portal.md](01.4-azure-cli-portal.md) — Azure CLI & Portal: install, auth, core commands, JMESPath, Cloud Shell, PowerShell
 - [02-it-basics.md](02-it-basics.md) — Git, GitHub, Azure DevOps detail
