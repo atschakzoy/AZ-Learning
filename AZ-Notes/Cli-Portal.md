@@ -94,9 +94,10 @@ You'll get a code to enter at `https://microsoft.com/devicelogin`.
 ### Checking your context
 
 ```bash
-az account show                        # current active subscription
-az account list --output table         # list all subscriptions you have access to
-az account list --all --output table   # include disabled subs
+az account show                              # current active subscription
+az account show --query id --output tsv      # get just the subscription ID (useful in scripts)
+az account list --output table               # list all subscriptions you have access to
+az account list --all --output table         # include disabled subs
 ```
 
 ### Switching subscriptions
@@ -175,6 +176,16 @@ az <service> <operation> [options]
 az <service> <subservice> <operation> [options]
 ```
 
+### Getting help
+
+Add `--help` to any command to see all available options — you don't need to look everything up online:
+
+```bash
+az keyvault --help                  # see all keyvault sub-commands
+az keyvault create --help           # see all options for keyvault create
+az storage account create --help    # same for storage
+```
+
 ### Resource Groups
 
 A resource group is a logical container for related resources.
@@ -227,7 +238,8 @@ az storage account create \
   --resource-group my-rg \
   --location eastus \
   --sku Standard_LRS \
-  --kind StorageV2
+  --kind StorageV2 \
+  --allow-blob-public-access false    # disables anonymous internet access to blobs — always set this in real environments
 
 # List storage accounts
 az storage account list --resource-group my-rg --output table
@@ -329,11 +341,35 @@ az webapp config appsettings set \
 ### Key Vault
 
 ```bash
-# Create a Key Vault
+# Create a Key Vault (basic)
 az keyvault create \
   --name my-kv-unique123 \
   --resource-group my-rg \
   --location eastus
+
+# Create a Key Vault with production-grade settings
+az keyvault create \
+  --name my-kv-unique123 \
+  --resource-group my-rg \
+  --location eastus \
+  --enable-rbac-authorization true \    # use RBAC instead of the old access policies model
+  --enable-soft-delete true \           # deleted secrets/keys are recoverable for 90 days
+  --enable-purge-protection true        # prevents anyone permanently deleting the vault during retention period
+
+# Show Key Vault details
+az keyvault show \
+  --name my-kv-unique123 \
+  --resource-group my-rg
+
+# Get just the Key Vault's resource ID — used as --scope in role assignments
+KV_ID=$(az keyvault show \
+  --name my-kv-unique123 \
+  --resource-group my-rg \
+  --query id \
+  --output tsv)
+
+# Permanently delete a soft-deleted Key Vault (needed if you want to reuse the same name)
+az keyvault purge --name my-kv-unique123
 
 # Set a secret
 az keyvault secret set \
@@ -352,17 +388,53 @@ az keyvault secret show \
 az keyvault secret list --vault-name my-kv-unique123 --output table
 ```
 
+### Log Analytics Workspace
+
+Log Analytics is a database for logs and metrics. Azure services send their diagnostic logs here, and you query them with KQL in later stages.
+
+```bash
+# Create a Log Analytics workspace
+az monitor log-analytics workspace create \
+  --resource-group my-rg \
+  --workspace-name law-platform-dev \
+  --location eastus
+
+# List workspaces in a resource group
+az monitor log-analytics workspace list \
+  --resource-group my-rg \
+  --output table
+
+# Get the workspace ID (needed when connecting other resources to it)
+az monitor log-analytics workspace show \
+  --resource-group my-rg \
+  --workspace-name law-platform-dev \
+  --query customerId \
+  --output tsv
+```
+
 ### RBAC
 
 ```bash
 # List role assignments for a resource group
 az role assignment list --resource-group my-rg --output table
 
-# Assign a role
+# List all role assignments for a specific user/SP across all scopes (subscription-wide)
+az role assignment list --assignee <object-id> --all --output table
+
+# Assign a role at resource group scope
 az role assignment create \
   --assignee user@example.com \
   --role Contributor \
   --scope /subscriptions/<sub-id>/resourceGroups/my-rg
+
+# Assign a role at individual resource scope (narrower — principle of least privilege)
+USER_ID=$(az ad signed-in-user show --query id --output tsv)   # get your own object ID
+KV_ID=$(az keyvault show --name my-kv-unique123 --resource-group my-rg --query id --output tsv)
+
+az role assignment create \
+  --assignee $USER_ID \
+  --role "Key Vault Secrets Officer" \    # data-plane role — allows read/write of secrets
+  --scope $KV_ID                          # scoped to just this vault, not the whole resource group
 
 # Remove a role assignment
 az role assignment delete \
@@ -373,6 +445,12 @@ az role assignment delete \
 # List available built-in roles
 az role definition list --output table
 az role definition list --name "Contributor"
+
+# Create a custom role from a JSON definition file (@ tells the CLI to read from file)
+az role definition create --role-definition @custom-role.json
+
+# Delete a custom role definition
+az role definition delete --name "Storage Reader Only"
 ```
 
 ### Entra ID (Azure AD)
@@ -383,6 +461,12 @@ az ad user list --output table
 
 # Show a specific user
 az ad user show --id user@example.com
+
+# Get just the object ID of a user — used when you need to assign a role to them
+az ad user show --id user@example.com --query id --output tsv
+
+# Get your own object ID (for assigning roles to yourself)
+USER_ID=$(az ad signed-in-user show --query id --output tsv)
 
 # List groups
 az ad group list --output table
@@ -650,14 +734,29 @@ az resource list -g my-rg --output table
 az resource show -g my-rg -n <name> --resource-type <type>
 
 # === STORAGE ===
-az storage account create -n <name> -g my-rg -l eastus --sku Standard_LRS
+az storage account create -n <name> -g my-rg -l eastus --sku Standard_LRS --allow-blob-public-access false
 az storage account list -g my-rg --output table
 az storage blob upload --account-name <acct> -c <container> -n <blob> -f <local>
 
+# === KEY VAULT ===
+az keyvault create -n <name> -g my-rg -l eastus --enable-rbac-authorization true --enable-purge-protection true
+az keyvault show -n <name> -g my-rg --query id -o tsv
+az keyvault purge -n <name>
+az keyvault secret set --vault-name <name> --name <secret> --value <value>
+az keyvault secret show --vault-name <name> --name <secret> --query value -o tsv
+az keyvault secret list --vault-name <name> --output table
+
+# === LOG ANALYTICS ===
+az monitor log-analytics workspace create -g my-rg --workspace-name law-dev -l eastus
+az monitor log-analytics workspace show -g my-rg --workspace-name law-dev --query customerId -o tsv
+
 # === RBAC ===
 az role assignment list -g my-rg --output table
+az role assignment list --assignee <object-id> --all --output table
 az role assignment create --assignee <upn-or-id> --role <role> --scope <scope>
 az role assignment delete --assignee <upn-or-id> --role <role> -g my-rg
+az role definition create --role-definition @custom-role.json
+az role definition delete --name "My Custom Role"
 
 # === OUTPUT & QUERY ===
 az group list --output json|table|tsv|yaml
