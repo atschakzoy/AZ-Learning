@@ -1,0 +1,31 @@
+# Secrets — never commit these
+.env
+.env.*
+secrets/
+*.pem
+*.key
+
+# Terraform
+*.tfstate
+*.tfstate.backup
+.terraform/
+.terraform.lock.hcl
+override.tf
+override.tf.json
+
+# Claude Code project settings
+.claude/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
