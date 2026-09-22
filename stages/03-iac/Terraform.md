@@ -8,6 +8,10 @@ Terraform is the most widely used IaC tool in the industry. Unlike Bicep, it wor
 
 **HCL (HashiCorp Configuration Language)** is the language Terraform uses. It is designed to be readable and easy to write.
 
+> **Note:** Terraform is not made by Microsoft — it is made by HashiCorp. This is why it works with AWS and GCP too, not just Azure. In Azure-only companies you often see Bicep. In companies using multiple clouds, you almost always see Terraform.
+
+> **`.tf` files** — all Terraform files use the `.tf` extension. You can split your config across multiple `.tf` files in the same folder and Terraform reads them all as one combined configuration.
+
 ---
 
 ## Install and Setup
@@ -24,6 +28,8 @@ terraform --version
 brew install tflint
 tflint --version
 ```
+
+> **`brew tap hashicorp/tap`** — `tap` adds a third-party source to Homebrew so it can find HashiCorp's packages. You only need to run this once. After that, `brew install` can find Terraform.
 
 VS Code extension: install **HashiCorp Terraform** — syntax highlighting and autocomplete for `.tf` files.
 
@@ -52,6 +58,14 @@ provider "azurerm" {
 }
 ```
 
+> **`~> 4.0`** — this is a version constraint. `~>` means "at least this version, but not the next major version". So `~> 4.0` allows `4.1`, `4.2`, `4.9` but NOT `5.0`. This protects you from breaking changes in major updates.
+
+> **`features {}`** — this block is required by the `azurerm` provider even if it is empty. Without it, Terraform will refuse to run. Think of it as a placeholder that exists so you can optionally add provider-level settings inside it (like Key Vault behavior).
+
+> **`required_version = ">= 1.9"`** — this ensures anyone running this config has at least Terraform 1.9 installed. If they have an older version, Terraform stops with a clear error instead of failing in a confusing way later.
+
+> **`providers.tf` is just a naming convention** — you could put everything in one file or name it anything. But separating providers into their own file is the standard pattern because it keeps configuration clean.
+
 ### 2 — Resource
 
 A resource is something Terraform will create and manage in Azure.
@@ -74,7 +88,14 @@ resource "azurerm_storage_account" "main" {
 }
 ```
 
-Format: `resource "<provider_type>" "<local_name>"` — the local name is what you use to reference it elsewhere.
+> **`resource "azurerm_resource_group" "main"`** — this has two names:
+> - `azurerm_resource_group` = the resource type (what kind of thing to create)
+> - `main` = the local name (how you refer to it inside your Terraform code)
+> The local name `main` has no effect in Azure — it only exists inside your `.tf` files.
+
+> **`azurerm_resource_group.main.name`** — this is how you reference another resource. The format is always `resource_type.local_name.attribute`. Terraform reads this reference and automatically knows it must create the resource group before the storage account.
+
+> **Terraform works out the order automatically.** You do not need to write resources in the correct order. If resource B references resource A, Terraform creates A first, then B.
 
 ### 3 — Variable
 
@@ -106,6 +127,12 @@ resource "azurerm_storage_account" "main" {
 }
 ```
 
+> **Variables without a `default` are required** — if you do not pass a value for `suffix`, Terraform will stop and ask you for it. Variables with a `default` are optional — Terraform uses the default if you do not pass a value.
+
+> **`${var.suffix}`** — this is string interpolation. It inserts the value of the variable into the string. If `suffix = "rn"`, the result is `"stplatformdevrn"`. The `${}` syntax only works inside strings (wrapped in `""`).
+
+> **Why put variables in a separate `variables.tf` file?** Convention — you could put them in `main.tf` and it would still work. But separating them makes it easy to see all inputs at a glance without scrolling through resource definitions.
+
 ### 4 — Output
 
 Outputs are values Terraform exports after running. Useful for reading resource IDs or names after deployment.
@@ -120,6 +147,10 @@ output "resource_group_id" {
   value = azurerm_resource_group.main.id
 }
 ```
+
+> **When do you use outputs?** When you need a value after deployment — for example, the storage account name to pass to a script, or the resource group ID to use in another Terraform config. Terraform prints outputs at the end of `apply`.
+
+> **`azurerm_storage_account.main.name`** — this reads the `name` attribute of the storage account after it is created. Terraform gets this value from Azure after the resource exists.
 
 ---
 
@@ -149,6 +180,14 @@ With a variables file:
 terraform plan -var-file="dev.tfvars"
 terraform apply -var-file="dev.tfvars"
 ```
+
+> **`terraform init`** downloads the provider plugin (e.g. `azurerm`) into a `.terraform/` folder in your project directory. This folder can be large (~50MB) and is listed in `.gitignore` — never commit it. You must run `terraform init` once before any other command, and again whenever you change providers or add a backend.
+
+> **`terraform plan` never touches Azure.** It only shows what would happen. Read the output carefully before running `apply`. There is no undo for apply.
+
+> **`terraform apply` asks "Do you want to perform these actions? yes/no"** — you must type the full word `yes`. Pressing Enter or typing `y` does not work. If you want to skip the prompt (e.g. in a pipeline), add `-auto-approve` flag — but never use this manually.
+
+> **`terraform destroy` deletes everything Terraform manages** — this includes the resource group and all resources inside it. It also asks for `yes` confirmation. Only use this in dev/test environments. Never on production.
 
 ---
 
@@ -180,6 +219,10 @@ terraform apply -var-file="dev.tfvars"
 
 **Always review `-` and `-/+` lines before typing `yes`.**
 
+> **What causes `-/+` (destroy and recreate)?** Some Azure properties cannot be changed after creation — for example, renaming a storage account, changing the location of a resource, or changing certain immutable settings. Terraform must delete the old one and create a new one. This causes downtime. Always check if a change will trigger `-/+` in the plan before applying to production.
+
+> **Why does Terraform show `-` for something I didn't touch?** Usually because you renamed the resource in your HCL code. Terraform sees the old name gone and the new name as new — it plans to delete the old and create the new. Use `terraform state mv old_name new_name` to rename in state without destroying.
+
 ---
 
 ## The State File
@@ -194,6 +237,10 @@ On every `plan`, Terraform:
 
 **Never edit the state file manually.** Use `terraform state` commands if something goes wrong.
 
+> **What happens if you delete the state file?** Terraform loses all memory of what it created. The next `plan` will show all resources as new — even if they already exist in Azure. If you then apply, Terraform tries to create them again and fails with "resource already exists" errors. Always protect the state file.
+
+> **`terraform.tfstate` contains sensitive data** — resource IDs, names, sometimes secrets. Never commit it to git. It is already listed in `.gitignore` by default in most setups.
+
 ---
 
 ## Remote State
@@ -204,6 +251,8 @@ If the state file lives on your laptop:
 - Two people running Terraform at the same time corrupt the state
 
 **Remote state** stores the state file in Azure Blob Storage (accessible to everyone) and uses blob leasing to prevent concurrent runs.
+
+> **Blob leasing** means when Terraform starts running, it "locks" the state file in Azure Blob. If someone else tries to run Terraform at the same time, they get an error saying the state is locked. This prevents two people from making conflicting changes at the same time.
 
 ### Setting up remote state backend (do this once, manually)
 
@@ -239,6 +288,8 @@ az role assignment create \
 
 > **Why a separate resource group?** The state storage outlives individual environments. If you delete `rg-platform-dev`, you want the state to survive. Keeping state in its own resource group prevents accidental deletion.
 
+> **`$(...)` — subshell syntax.** The `$()` runs the inner command and replaces itself with the output. So `--assignee $(az ad signed-in-user show --query id -o tsv)` runs the inner `az` command, gets your user ID as text, and passes it as the value of `--assignee`. You do not need to run them separately.
+
 ### Backend block in providers.tf
 
 ```hcl
@@ -259,6 +310,10 @@ terraform {
   }
 }
 ```
+
+> **`key = "platform-dev.tfstate"`** — this is the filename of the state file inside the blob container. Each environment gets its own state file. For example, dev uses `platform-dev.tfstate` and prod would use `platform-prod.tfstate`. This way they do not overwrite each other.
+
+> **`use_azuread_auth = true`** — tells Terraform to authenticate to the storage account using your Azure CLI login (Entra ID), instead of a storage access key. This is the secure modern approach — you do not need to store a storage account key anywhere.
 
 After adding the backend block, run `terraform init` again — it will ask to copy local state to the remote. Type `yes`.
 
@@ -295,6 +350,14 @@ output "storage_endpoint" {
 }
 ```
 
+> **`source = "./modules/storage"`** — points to the folder containing the module's `.tf` files. `./` means starting from the current directory. Terraform reads all `.tf` files inside that folder as the module.
+
+> **After adding or changing a module's `source`, run `terraform init` again.** Terraform needs to register the new module before it can use it. You will see "Initializing modules..." in the output.
+
+> **The values you pass to the module (like `name`, `resource_group_name`) must match the variable names defined in the module's `variables.tf`.** If the module expects `name` and you pass `storage_name`, Terraform will error.
+
+> **`module.storage.primary_blob_endpoint`** — access a module's output with `module.local_name.output_name`. The module must define that output in its `outputs.tf` for this to work.
+
 ---
 
 ## Useful Commands
@@ -329,6 +392,16 @@ az storage blob list \
   --output table
 ```
 
+> **`terraform fmt`** — automatically formats your `.tf` files to the official style. It fixes indentation, aligns `=` signs, and removes extra whitespace. It is deterministic — run it 10 times, you get the same result. Run it before every commit.
+
+> **`terraform validate`** — checks that your config is syntactically correct and internally consistent (e.g. no missing required arguments). It does NOT connect to Azure and does NOT check if resource names are unique or available.
+
+> **`tflint`** — a separate tool that catches things `validate` misses, like deprecated arguments, invalid resource names, or missing tags. Run `tflint --init` once to download plugins, then just `tflint` on subsequent runs.
+
+> **`terraform destroy -target=...`** — destroys only the named resource, leaves everything else. The format is `resource_type.local_name` — the same as how you reference resources in code.
+
+> **`terraform state list`** — shows every resource Terraform is currently tracking. Useful for checking what is in state before running destructive commands.
+
 ---
 
 ## Variables File (.tfvars)
@@ -348,6 +421,13 @@ terraform plan  -var-file="dev.tfvars"
 terraform apply -var-file="dev.tfvars"
 ```
 
+> **`.tfvars` vs `variables.tf`** — these are different things:
+> - `variables.tf` declares the variables (their names, types, descriptions, and optional defaults)
+> - `dev.tfvars` provides the actual values for those variables
+> Think of `variables.tf` as the form template and `dev.tfvars` as the filled-in form.
+
+> **You can have multiple `.tfvars` files** — one per environment: `dev.tfvars`, `staging.tfvars`, `prod.tfvars`. Pass the right one when running plan/apply.
+
 ---
 
 ## Data Sources
@@ -361,11 +441,17 @@ data "azurerm_client_config" "current" {}
 # Use it in a resource
 resource "azurerm_key_vault" "main" {
   # ...
-  properties: {
-    tenant_id = data.azurerm_client_config.current.tenant_id
-  }
+  tenant_id = data.azurerm_client_config.current.tenant_id
 }
 ```
+
+> **Resource vs Data Source:**
+> - `resource` = Terraform creates and manages this thing
+> - `data` = Terraform reads this thing (it already exists, Terraform does not create it)
+
+> **`data "azurerm_client_config" "current" {}`** — this reads information about the currently authenticated user (the one running `terraform apply`). The empty `{}` means no filters needed — just give me the current user. You use this to get the tenant ID for Key Vault without hardcoding it.
+
+> **`data.azurerm_client_config.current.tenant_id`** — access a data source's value with `data.type.local_name.attribute`. Same pattern as resources, just with `data.` at the front.
 
 ---
 
@@ -376,6 +462,8 @@ resource "azurerm_key_vault" "main" {
 ```bash
 mkdir ~/tf-practice && cd ~/tf-practice
 ```
+
+> **`mkdir ~/tf-practice && cd ~/tf-practice`** — creates the folder and immediately moves into it. `~/` is your home directory. `&&` means "run this only if the previous command succeeded."
 
 Create `providers.tf`:
 ```hcl
@@ -415,7 +503,11 @@ terraform apply
 # Type: yes
 ```
 
+> **`.terraform/` folder** — created by `terraform init`. It contains the downloaded provider plugin. It can be 50-100MB. Never commit this to git — it is in `.gitignore`. If you delete it, just run `terraform init` again.
+
 Confirm the resource group exists in the Portal. Open `terraform.tfstate` — find your resource group inside the JSON.
+
+> **`terraform.tfstate`** — open it with VS Code and look at the `resources` array. You will see your resource group listed with its Azure ID. This is how Terraform remembers what it created.
 
 ### Exercise 2 — Add a storage account
 
@@ -432,6 +524,8 @@ resource "azurerm_storage_account" "practice" {
 
 Run `terraform plan` — only the storage account should appear as new. The resource group shows no changes.
 
+> **Why does the resource group show no changes?** Because the state file already tracks it and it matches what is in Azure. Terraform only shows changes for things that are new or different.
+
 Apply, then check `terraform.tfstate` — the storage account entry is now there too.
 
 ### Exercise 3 — Target destroy
@@ -442,6 +536,8 @@ terraform destroy -target=azurerm_storage_account.practice
 ```
 
 Confirm the storage account is gone but the resource group still exists.
+
+> **`azurerm_storage_account.practice`** — the format is `resource_type.local_name`. The `practice` here is the local name you gave the resource in your `main.tf`, not the Azure resource name.
 
 ### Exercise 4 — Format and validate
 
@@ -477,6 +573,8 @@ After deploying Terraform in the project step:
 
 This is drift. In a real environment, someone changing resources manually is a problem — Terraform reverts their change on the next apply. This is why IaC is the single source of truth.
 
+> **Why does Terraform want to remove the tag?** Because your `.tf` files do not define that tag. Terraform's job is to make Azure match your code — and your code says "no tags". So it plans to remove the manually added one.
+
 ---
 
 ## Project: Terraform for Foundation Infra
@@ -504,6 +602,8 @@ project/infra/terraform/
         ├── variables.tf
         └── outputs.tf
 ```
+
+> **You always run Terraform commands from the root of this folder** (i.e. inside `project/infra/terraform/`). Terraform reads all `.tf` files in the current directory. The modules are in subdirectories — Terraform only reads those when called via `module` blocks.
 
 ### `providers.tf`
 
@@ -535,6 +635,10 @@ provider "azurerm" {
 }
 ```
 
+> **`purge_soft_delete_on_destroy = false`** — when Terraform destroys a Key Vault, should it also permanently purge it from soft-delete? Setting this to `false` means the Key Vault goes into the soft-delete bin (recoverable for 90 days) instead of being permanently gone immediately. Safer default.
+
+> **`recover_soft_deleted_key_vaults = true`** — if Terraform tries to create a Key Vault that already exists in soft-delete (same name), should it automatically recover it instead of creating a new one? Setting this to `true` means Terraform handles this automatically instead of failing.
+
 ### `variables.tf`
 
 ```hcl
@@ -555,6 +659,8 @@ variable "location" {
   description = "Azure region for all resources"
 }
 ```
+
+> **`suffix` has no default** — this means it is required. If you run `terraform plan` without passing `suffix`, Terraform will ask you to type it in the terminal. To avoid the prompt, always pass it via `-var-file="dev.tfvars"`.
 
 ### `main.tf`
 
@@ -592,6 +698,10 @@ module "loganalytics" {
 }
 ```
 
+> **`data "azurerm_client_config" "current" {}`** — reads your current Azure login details. The `tenant_id` from this is passed to the Key Vault module. Without it you would have to hardcode your tenant ID, which is bad practice.
+
+> **`azurerm_resource_group.main.name` vs `var.environment`** — when you reference another resource (like `azurerm_resource_group.main.name`), Terraform automatically waits for that resource to be created first. This is how it knows the order of creation without you having to specify it.
+
 ### `dev.tfvars`
 
 ```hcl
@@ -619,6 +729,10 @@ resource "azurerm_storage_account" "main" {
 }
 ```
 
+> **`min_tls_version = "TLS1_2"`** — only allow connections using TLS 1.2 or higher. Older versions (TLS 1.0, 1.1) are less secure. Always set this.
+
+> **`delete_retention_policy { days = 7 }`** — if you delete a blob (file in storage), it is not immediately gone. It is kept for 7 days and can be recovered. After 7 days it is permanently deleted. This protects against accidental file deletion.
+
 ### `modules/storage/variables.tf`
 
 ```hcl
@@ -626,6 +740,8 @@ variable "name" { type = string }
 variable "resource_group_name" { type = string }
 variable "location" { type = string }
 ```
+
+> **Module variables are the module's inputs.** The root `main.tf` passes values for these when it calls the module. The names here must match exactly what the root passes.
 
 ### `modules/storage/outputs.tf`
 
@@ -636,6 +752,8 @@ output "primary_blob_endpoint" {
   value = azurerm_storage_account.main.primary_blob_endpoint
 }
 ```
+
+> **Module outputs are the module's return values.** After the module runs, the root `main.tf` can read these values using `module.storage.primary_blob_endpoint`. If you do not define an output here, the root cannot access that value.
 
 Create similar `main.tf`, `variables.tf`, and `outputs.tf` for `modules/keyvault/` and `modules/loganalytics/` following the same pattern.
 
@@ -668,6 +786,12 @@ az storage blob list \
 # Expected: platform-dev.tfstate listed
 ```
 
+> **`cd project/infra/terraform`** — you must be inside the terraform folder before running any `terraform` commands. Terraform looks for `.tf` files in the current directory. If you are in the wrong folder it will say "no configuration files found."
+
+> **`terraform fmt -recursive`** — the `-recursive` flag formats `.tf` files in all subdirectories too (including your modules). Without it, only the current folder is formatted.
+
+> **"If prompted about copying state, type `yes`"** — this happens when you switch from no backend (local state) to a remote backend. Terraform finds the local `terraform.tfstate` and asks if you want to copy it to Azure Blob. Always say yes so you do not lose state history.
+
 ---
 
 ## Commit via PR
@@ -698,3 +822,6 @@ Open a PR, merge it.
 | `terraform fmt` doesn't change anything | File is already correctly formatted — this is fine, `fmt` is idempotent |
 | `terraform apply` says "No changes" | Your code already matches what exists in Azure — correct behavior |
 | Plan shows `-` for resource you didn't touch | You renamed the resource in HCL — Terraform sees it as delete+create. Use `terraform state mv` to rename in state without destroying |
+| "No configuration files found" | You ran `terraform` in the wrong folder. `cd` into the folder that contains your `.tf` files |
+| Module not found after adding it | Run `terraform init` again — Terraform must register new modules before using them |
+| Required variable not set | You did not pass a value for a variable with no default. Pass it via `-var-file` or Terraform will ask you in the terminal |

@@ -1,2 +1,3 @@
 using 'main.bicep'
-param storageAccountName = 'stmyappi5432'
+param storageAccountName = 'stjustmaindev'
+param keyVaultName = 'kv-justmain-dev'
