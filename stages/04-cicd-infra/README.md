@@ -178,7 +178,6 @@ on:                       # triggers — what event causes this workflow to run
       - 'project/infra/terraform/**'  # only when these files changed
 
 permissions:              # what the workflow token can do
-  id-token: write         # required for OIDC authentication
   contents: read          # read repo files
   pull-requests: write    # post comments on PRs
 
@@ -194,13 +193,14 @@ jobs:                     # one or more parallel jobs
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}  # from GitHub Secrets
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}  # service principal secret
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Run a command
         run: echo "Hello from the pipeline"   # raw bash command
 ```
 
-**Community actions** (`uses: ...`) are reusable pieces of automation published to the GitHub Marketplace. `actions/checkout@v4` checks out your code. `azure/login@v2` handles OIDC authentication to Azure. `hashicorp/setup-terraform@v3` installs Terraform.
+**Community actions** (`uses: ...`) are reusable pieces of automation published to the GitHub Marketplace. `actions/checkout@v4` checks out your code. `azure/login@v2` handles service principal authentication to Azure. `hashicorp/setup-terraform@v3` installs Terraform.
 
 **GitHub Secrets** are encrypted variables stored per-repo. They are injected into workflows as `${{ secrets.VARIABLE_NAME }}`. They are never visible in logs — GitHub redacts them.
 

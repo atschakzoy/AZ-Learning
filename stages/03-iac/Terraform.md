@@ -385,6 +385,10 @@ terraform state list
 # Show a specific resource in state
 terraform state show azurerm_storage_account.main
 
+# Force-unlock a stuck state lock (use the Lock ID from the error message)
+terraform force-unlock <LOCK_ID>
+# Type "yes" to confirm
+
 # Verify state is stored in Azure Blob
 az storage blob list \
   --account-name "sttfstate${SUFFIX}" \
@@ -452,6 +456,10 @@ resource "azurerm_key_vault" "main" {
 > **`data "azurerm_client_config" "current" {}`** — this reads information about the currently authenticated user (the one running `terraform apply`). The empty `{}` means no filters needed — just give me the current user. You use this to get the tenant ID for Key Vault without hardcoding it.
 
 > **`data.azurerm_client_config.current.tenant_id`** — access a data source's value with `data.type.local_name.attribute`. Same pattern as resources, just with `data.` at the front.
+
+> **Where to put it** — declare `data "azurerm_client_config" "current" {}` once in `provider.tf`. Terraform shares all data sources across every `.tf` file in the same directory, so you can reference `data.azurerm_client_config.current` in `main.tf`, modules, or anywhere else without redeclaring it.
+
+> **Not just for Key Vault** — `azurerm_client_config` is useful any time you'd otherwise hardcode an ID: role assignments (grant the Terraform runner a role), Entra ID app registrations (need `tenant_id`), storage account RBAC, and anywhere you pass `subscription_id`. Rule of thumb: if you see a hardcoded tenant/subscription/object ID, replace it with this data source.
 
 ---
 
@@ -815,7 +823,7 @@ Open a PR, merge it.
 
 | Mistake | Fix |
 |---------|-----|
-| `terraform init` fails — "Error acquiring the state lock" | Another Terraform process crashed and left a lock. Find the lease in Portal (storage account → container → `platform-dev.tfstate.lock`) and break it, or wait a few minutes |
+| `terraform init` fails — "Error acquiring the state lock" | Another Terraform process crashed and left a lock. Run `terraform force-unlock <LOCK_ID>` using the ID shown in the error, then type `yes` to confirm. The lock releases automatically on successful apply — only force-unlock when a run was interrupted. |
 | "Existing state found for backend" | When switching from local to remote backend, Terraform asks to copy state. Type `yes` |
 | Terraform destroys and recreates a resource instead of updating | Some changes require replacement. Read the plan for `-/+` entries — these are destructive |
 | Key Vault already has purge protection and soft delete | Run `az keyvault list-deleted` and `az keyvault purge --name ...` to remove the soft-deleted vault first |
@@ -825,3 +833,7 @@ Open a PR, merge it.
 | "No configuration files found" | You ran `terraform` in the wrong folder. `cd` into the folder that contains your `.tf` files |
 | Module not found after adding it | Run `terraform init` again — Terraform must register new modules before using them |
 | Required variable not set | You did not pass a value for a variable with no default. Pass it via `-var-file` or Terraform will ask you in the terminal |
+| `min_tls_version = "TLS-2"` error | Correct value is `"TLS1_2"` — the format uses underscore, not a dash |
+| `tenant_id = data.azurerm_client_config.current` type error | Missing the attribute at the end — use `data.azurerm_client_config.current.tenant_id` |
+| `azurerm_log_analytics_workspace` fails | `location` is required — add `location = azurerm_resource_group.main.location` |
+| `azurerm_storage_container` — unknown argument `storage_account_name` | Removed in AzureRM v4 — use `storage_account_id = azurerm_storage_account.main.id` instead |
