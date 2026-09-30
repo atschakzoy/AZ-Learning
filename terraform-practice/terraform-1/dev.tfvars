@@ -1,0 +1,10 @@
+environment                  = "dev"
+suffix                       = "rn"
+location                     = "germanywestcentral"
+resource_group_name          = "value"
+storage_account_name         = "sttfexample001devrn"
+container_name               = "tfstate001er"
+key_vault_name               = "kv-tfexample001"
+rbac_authorization_enabled   = true
+keyvault_sku_name            = "standard"
+log_analytics_workspace_name = "law-tfexample"

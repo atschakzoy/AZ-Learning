@@ -1,0 +1,76 @@
+# Azure DevOps pipeline — CI validation only (no apply).
+# Create in ADO: Pipelines -> New pipeline -> Azure Repos Git -> Starter pipeline,
+# then paste this file in place of the starter YAML.
+
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  - group: terraform-vars # Pipeline variable group holding tfvars values
+  - name: terraformDir
+    value: terraform-practice/terraform-1
+
+steps:
+  - checkout: self
+    fetchDepth: 0 # full history so PR diffs resolve
+
+  - task: TerraformInstaller@0
+    displayName: Install Terraform
+    inputs:
+      terraformProvider: HashiCorp
+      terraformVersion: 1.9.8
+
+  - script: |
+      set -euo pipefail
+      cd "$(terraformDir)"
+      terraform fmt -check -recursive
+    displayName: Terraform Format
+    workingDirectory: $(Build.SourcesDirectory)
+
+  - script: |
+      set -euo pipefail
+      cd "$(terraformDir)"
+      terraform init -backend=false
+    displayName: Terraform Init
+    workingDirectory: $(Build.SourcesDirectory)
+
+  - script: |
+      set -euo pipefail
+      cd "$(terraformDir)"
+      terraform validate
+    displayName: Terraform Validate
+    workingDirectory: $(Build.SourcesDirectory)
+
+  - task: AzureCLI@2
+    displayName: Azure Login Check
+    inputs:
+      azureSubscription: azure-subscription-dev
+      scriptType: bash
+      scriptLocation: inlineScript
+      inlineScript: az account show --output table
+
+  - script: |
+      set -euo pipefail
+      cd "$(terraformDir)"
+      terraform plan -input=false -no-color -var-file=dev.tfvars -out=tfplan
+    displayName: Terraform Plan (dev)
+    workingDirectory: $(Build.SourcesDirectory)
+    env:
+      ARM_USE_OIDC: 'true'
+
+  - task: PublishPipelineArtifact@1
+    displayName: Publish Plan
+    condition: succeededOrFailed()
+    inputs:
+      targetPath: $(Build.SourcesDirectory)/$(terraformDir)/tfplan
+      artifact: tfplan
