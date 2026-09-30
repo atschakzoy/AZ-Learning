@@ -1,6 +1,10 @@
 resource "azurerm_resource_group" "main" {
   name     = "rg-tfexample-${var.environment}-${var.suffix}"
   location = var.location
+  tags = {
+    managed-by = "terraform"
+    stage      = "4"
+  }
 }
 resource "azurerm_storage_account" "main" {
   name                     = var.storage_account_name
