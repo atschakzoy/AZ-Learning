@@ -618,3 +618,51 @@ jobs:
 - No `terraform plan` step — goes straight to apply after approval.
 - `-auto-approve` — skips Terraform's interactive yes/no prompt. The human approval already happened via the GitHub environment gate.
 
+---
+
+# Azure DevOps (ADO) — Variable Groups
+
+## What is a Variable Group?
+
+A Variable Group is a set of shared variables stored in ADO Library. You define it once and any pipeline can reference it — no copying the same values into every YAML file.
+
+**Where it lives:** ADO → Pipelines → Library → Variable groups
+
+---
+
+## Exercise 9 — terraform-shared Variable Group
+
+Created a variable group named `terraform-shared` with these variables:
+
+| Name | Value |
+|---|---|
+| `TF_RESOURCE_GROUP` | `rg-tfstate` |
+| `TF_STORAGE_ACCOUNT` | `sttfstatern001` |
+| `TF_CONTAINER` | `tfstate` |
+
+---
+
+## How to Reference a Variable Group in a Pipeline
+
+```yaml
+variables:
+  - group: terraform-shared
+```
+
+Add this at the top level of the pipeline YAML (same level as `trigger:`, `pool:`).
+
+Then use the variables with `$(VARIABLE_NAME)` — same syntax as built-in ADO variables:
+
+```yaml
+commandOptions: -var-file="dev.tfvars"
+backendAzureRmResourceGroupName: $(TF_RESOURCE_GROUP)
+backendAzureRmStorageAccountName: $(TF_STORAGE_ACCOUNT)
+backendAzureRmContainerName: $(TF_CONTAINER)
+```
+
+**Why use variable groups instead of hardcoding:**
+- Change a value in one place → all pipelines pick it up automatically
+- In real projects: link the group to Azure Key Vault so secrets are never copied into ADO at all
+
+---
+
