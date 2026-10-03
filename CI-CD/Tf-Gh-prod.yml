@@ -1,4 +1,4 @@
-name: Terrafomr Apply
+name: Terraform Apply
 
 on: 
   push:
@@ -8,7 +8,7 @@ on:
 
 permissions:
   id-token: write
-  content: read
+  contents: read
 
 jobs:
   apply:
@@ -34,7 +34,7 @@ jobs:
       - name: Install Terraform
         uses: hashicorp/setup-terraform@v3
         with: 
-          terraform-version: "~1.9"
+          terraform_version: "~1.9"
 
       - name: Terraform Init
         working-directory: terraform-practice/terraform-1
