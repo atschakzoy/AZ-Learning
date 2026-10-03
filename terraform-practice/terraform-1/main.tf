@@ -3,7 +3,7 @@ resource "azurerm_resource_group" "main" {
   location = var.location
   tags = {
     managed-by = "terraform"
-    stage      = "7"
+    stage      = "8"
   }
 }
 resource "azurerm_storage_account" "main" {
