@@ -1,0 +1,76 @@
+name: My Terraform Workflow
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'terraform-practice/terraform-1/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    #for OIDC authentication
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Terraform Format Check
+        working-directory: terraform-practice/terraform-1
+        run: terraform fmt -check -recursive
+
+      - name: Terraform Init
+        working-directory: terraform-practice/terraform-1
+        run: terraform init
+
+      - name: Terraform Validate
+        working-directory: terraform-practice/terraform-1
+        run: terraform validate
+
+      - name: Terraform Plan
+        id: plan
+        working-directory: terraform-practice/terraform-1
+        run: terraform plan -var-file="dev.tfvars" -no-color
+        continue-on-error: true
+
+      - name: Post Plan as PR Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### Terraform Plan Result
+            \`\`\`
+            ${{ steps.plan.outputs.stdout }}
+            \`\`\`
+            **Status:** ${{ steps.plan.outcome }}`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Fail if Plan Failed
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
