@@ -291,3 +291,239 @@ Without `init`, commands like `validate` and `plan` fail immediately because the
 - `continue-on-error: true` → if plan fails, the workflow continues to the next step so we can post the error as a PR comment before failing
 
 **Is it required?** Yes — this is the whole point of the PR workflow. The reviewer sees exactly what Terraform will do before approving.
+
+---
+
+---
+
+# Azure DevOps (ADO) Pipeline — Notes
+
+## How ADO Pipelines Differ from GitHub Actions
+
+```
+GitHub Actions                    Azure DevOps Pipelines
+──────────────────────────────    ──────────────────────────────
+on:                               trigger: / pr:
+jobs: → job-name: → steps:       pool: → steps: (flat, no job nesting required)
+runs-on: ubuntu-latest            vmImage: ubuntu-latest
+uses: some-action@v1              task: SomeTask@1
+${{ secrets.MY_SECRET }}          $(MY_VARIABLE)
+permissions: id-token: write      Service Connection (set in ADO UI)
+```
+
+---
+
+## Setting Up a Service Connection (Do This Before Writing the Pipeline)
+
+A Service Connection is how Azure DevOps authenticates to your Azure subscription. It replaces everything you did for GitHub (App Registration + Federated Credentials + GitHub Secrets) — all handled automatically by ADO.
+
+**Steps:**
+1. Azure DevOps → your project → **Project Settings** (bottom left)
+2. **Pipelines** → **Service connections**
+3. **New service connection** → **Azure Resource Manager**
+4. Select **Workload Identity Federation (automatic)** — free OIDC, no passwords
+5. Choose your subscription, leave resource group empty
+6. Name it (e.g. `azure-service-connection`)
+7. Check **Grant access permission to all pipelines** → Save
+
+You reference this name in every task that needs Azure access.
+
+---
+
+## Step 1 — The Trigger (`trigger:` / `pr:`)
+
+```yaml
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform-practice/terraform-1/**
+```
+
+**What it means:**
+- `trigger: none` → do not run on direct pushes (equivalent to not having `on: push` in GitHub Actions)
+- `pr:` → run when a Pull Request is opened or updated (equivalent to `on: pull_request`)
+- `branches: include: [main]` → only when the PR targets the `main` branch
+- `paths: include:` → only when files inside `terraform-practice/terraform-1/` changed — no point running Terraform if only a README changed
+
+**Difference from GitHub Actions:**
+- GitHub Actions uses one `on:` block for everything
+- ADO splits it: `trigger:` controls push events, `pr:` controls pull request events
+
+**Is it required?** Yes — without it ADO doesn't know when to run the pipeline.
+
+---
+
+## Step 2 — The Pool (`pool:`)
+
+```yaml
+trigger: none
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform-practice/terraform-1/**
+
+pool:
+  vmImage: ubuntu-latest
+```
+
+**What it means:**
+- `pool:` → tells ADO what machine to run the pipeline on
+- `vmImage: ubuntu-latest` → use a fresh Ubuntu Linux VM — same machine as GitHub Actions `runs-on: ubuntu-latest`
+- The machine starts completely empty and is deleted when the pipeline finishes
+
+**Difference from GitHub Actions:**
+- GitHub Actions: `runs-on:` lives inside the job block (nested under `jobs: → plan:`)
+- ADO: `pool:` is at the top level — when you have a single job, no `jobs:` nesting is needed
+
+**Is it required?** Yes — without it ADO doesn't know what machine to use.
+
+---
+
+## Step 3 — Checkout Code (`checkout: self`)
+
+```yaml
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+  - checkout: self
+```
+
+**What it means:**
+- `steps:` → the list of tasks the pipeline runs in order, one by one
+- `- checkout: self` → downloads your repo code onto the runner machine
+- `self` means "this repo" — the one the pipeline lives in
+
+**Difference from GitHub Actions:**
+- GitHub Actions: `uses: actions/checkout@v4` — a third-party action you reference by name
+- ADO: `checkout: self` is a built-in keyword, no external action needed
+
+**Is it required?** Yes — always the first step. The runner starts completely empty, without this there are no `.tf` files to work with.
+
+---
+
+## Step 4 — Install Terraform (`TerraformInstaller@1`)
+
+```yaml
+steps:
+  - checkout: self
+
+  - task: TerraformInstaller@1
+    displayName: Install Terraform
+    inputs:
+      terraformVersion: "~1.9"
+```
+
+**What it means:**
+- `task:` → uses a pre-built ADO task (equivalent to `uses:` in GitHub Actions)
+- `TerraformInstaller@1` → official HashiCorp task that installs Terraform on the runner (`@1` is the version of the task itself)
+- `displayName:` → the label you see in the ADO UI (equivalent to `name:` in GitHub Actions)
+- `inputs:` → arguments passed to the task (equivalent to `with:` in GitHub Actions)
+- `terraformVersion: "~1.9"` → install Terraform 1.9.x, same as the GitHub Actions workflow
+
+**Difference from GitHub Actions:**
+- GitHub Actions: `uses: hashicorp/setup-terraform@v3` with `with:`
+- ADO: `task: TerraformInstaller@1` with `inputs:`
+
+**Is it required?** Yes — the Ubuntu runner has no Terraform installed. Without this every `terraform` command fails.
+
+---
+
+## Step 5 — Terraform Init (`TerraformTaskV4@4`)
+
+```yaml
+  - task: TerraformTaskV4@4
+    displayName: Terraform Init
+    inputs:
+      provider: azurerm
+      command: init
+      workingDirectory: $(System.DefaultWorkingDirectory)/terraform-practice/terraform-1
+      backendServiceArm: azure-service-connection
+      backendAzureRmResourceGroupName: rg-tfstate
+      backendAzureRmStorageAccountName: sttfstatern001
+      backendAzureRmContainerName: tfstate
+      backendAzureRmKey: terraform.tfstate
+```
+
+**What it means:**
+- `task: TerraformTaskV4@4` → official HashiCorp Terraform task for running Terraform commands (`@4` is the task version)
+- `command: init` → runs `terraform init`
+- `workingDirectory:` → folder containing your `.tf` files. `$(System.DefaultWorkingDirectory)` is a built-in ADO variable pointing to the repo root (equivalent to `working-directory:` in GitHub Actions)
+- `backendServiceArm:` → uses your service connection to authenticate to the Azure storage account where Terraform state is stored
+- `backendAzureRm*` fields → match exactly what is in your `provider.tf` backend block — resource group, storage account, container, and key
+
+**Difference from GitHub Actions:**
+- GitHub Actions: runs `terraform init` as a plain bash command, relies on `ARM_USE_OIDC` env vars for auth
+- ADO: the task handles backend authentication automatically using the service connection — no env vars needed
+
+**Is it required?** Yes — downloads the Azure provider plugin and connects to the remote state backend. Must run before validate and plan.
+
+---
+
+## Step 6 — Terraform Validate
+
+```yaml
+  - task: TerraformTaskV4@4
+    displayName: Terraform Validate
+    inputs:
+      provider: azurerm
+      command: validate
+      workingDirectory: $(System.DefaultWorkingDirectory)/terraform-practice/terraform-1
+```
+
+**What it means:**
+- Same `TerraformTaskV4@4` task as init, but `command: validate` this time
+- Checks your `.tf` files for syntax errors and invalid configuration — does NOT connect to Azure
+- No backend inputs needed — validate only reads the code, not the state file
+- Catches: missing required variables, wrong resource argument names, invalid types
+
+**Difference from GitHub Actions:**
+- GitHub Actions: `run: terraform validate` as a plain bash command
+- ADO: same task as init, just a different `command:` value — the pattern is consistent across all Terraform commands
+
+**Is it required?** No — but strongly recommended. Catches code mistakes before the more expensive `plan` step runs.
+
+---
+
+## Step 7 — Terraform Plan
+
+```yaml
+  - task: TerraformTaskV4@4
+    displayName: Terraform Plan
+    inputs:
+      provider: azurerm
+      command: plan
+      workingDirectory: $(System.DefaultWorkingDirectory)/terraform-practice/terraform-1
+      environmentServiceNameAzureRM: azure-service-connection
+      commandOptions: -var-file="dev.tfvars" -no-color
+```
+
+**What it means:**
+- `command: plan` → runs `terraform plan` — connects to Azure and calculates what will change, nothing is created or deleted yet
+- `environmentServiceNameAzureRM:` → uses the service connection to authenticate to Azure for the plan
+- `commandOptions:` → extra flags passed directly to the terraform command
+  - `-var-file="dev.tfvars"` → use your variable values from dev.tfvars
+  - `-no-color` → clean output without color codes
+
+**Important — two different input names for the service connection:**
+| Step | Input key |
+|---|---|
+| Init | `backendServiceArm` |
+| Plan | `environmentServiceNameAzureRM` |
+
+Both point to the same `azure-service-connection` — they just serve different purposes (storage access vs Azure resource access).
+
+**Difference from GitHub Actions:**
+- GitHub Actions: uses `continue-on-error: true` + a separate script step to post plan output as a PR comment
+- ADO: the task output is shown directly in the pipeline UI — no extra script needed
+
+**Is it required?** Yes — this is the whole point of the PR pipeline. Shows exactly what will change before anyone approves the merge.
