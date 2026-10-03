@@ -527,3 +527,94 @@ Both point to the same `azure-service-connection` — they just serve different 
 - ADO: the task output is shown directly in the pipeline UI — no extra script needed
 
 **Is it required?** Yes — this is the whole point of the PR pipeline. Shows exactly what will change before anyone approves the merge.
+
+---
+
+## GitHub Actions — tf-apply.yml (CD Pipeline)
+
+This workflow runs after a PR is merged to main and applies the Terraform changes.
+
+**How it differs from tf-plan.yml:**
+| | tf-plan.yml | tf-apply.yml |
+|---|---|---|
+| Trigger | `pull_request` | `push` to `main` |
+| Runs | On every PR | After PR is merged |
+| Command | `terraform plan` | `terraform apply` |
+| Approval gate | None (read-only) | `environment: production` |
+| PR comment | Yes | No |
+
+---
+
+### Step 1 — Trigger and Permissions
+
+```yaml
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'terraform-practice/terraform-1/**'
+
+permissions:
+  id-token: write
+  contents: read
+```
+
+- Trigger is `push` to `main` — fires after a PR is merged, not when it is opened.
+- No `pull-requests: write` — this workflow doesn't post PR comments.
+
+---
+
+### Step 2 — Job with Environment Gate
+
+```yaml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+```
+
+- `environment: production` — pauses the job and waits for a required reviewer to approve in the GitHub UI before continuing.
+- The `production` environment must be created in GitHub Settings → Environments with a required reviewer added.
+- Same `env:` OIDC variables as tf-plan.yml.
+
+---
+
+### Step 3 — Steps
+
+```yaml
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Terraform Init
+        working-directory: terraform-practice/terraform-1
+        run: terraform init
+
+      - name: Terraform Apply
+        working-directory: terraform-practice/terraform-1
+        run: terraform apply -var-file="dev.tfvars" -auto-approve
+```
+
+- No `fmt -check` or `validate` — those already ran in the plan phase on the PR.
+- No `terraform plan` step — goes straight to apply after approval.
+- `-auto-approve` — skips Terraform's interactive yes/no prompt. The human approval already happened via the GitHub environment gate.
+
