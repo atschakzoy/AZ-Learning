@@ -59,3 +59,88 @@ resource "azurerm_cognitive_deployment" "main" {
   }
 
 }
+
+resource "azurerm_container_registry" "main" {
+  name = var.acr_name
+  resource_group_name = azurerm_resource_group.main.name
+  location = azurerm_resource_group.main.location
+  sku = "Basic"
+  admin_enabled = true
+}
+
+resource "azurerm_user_assigned_identity" "main" {
+  name                = var.managed_identity_name
+  resource_group_name = azurerm_resource_group.main.name
+  location            = azurerm_resource_group.main.location
+}
+
+resource "azurerm_role_assignment" "kv_secrets_user" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_user_assigned_identity.main.principal_id
+}
+
+resource "azurerm_container_app_environment" "main" {
+  name                       = var.container_app_env_name
+  resource_group_name        = azurerm_resource_group.main.name
+  location                   = azurerm_resource_group.main.location
+  log_analytics_workspace_id = azurerm_log_analytics_workspace.main.id
+}
+resource "azurerm_container_app" "main" {
+  name                         = var.container_app_name
+  resource_group_name          = azurerm_resource_group.main.name
+  container_app_environment_id = azurerm_container_app_environment.main.id
+  revision_mode                = "Single"
+
+  identity {
+    type         = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.main.id]
+  }
+
+  template {
+    container {
+      name   = "ai-app"
+      image  = "${azurerm_container_registry.main.login_server}/ai-app:latest"
+      cpu    = 0.25
+      memory = "0.5Gi"
+
+      env {
+        name  = "AZURE_OPENAI_ENDPOINT"
+        value = azurerm_cognitive_account.main.endpoint
+      }
+      env {
+        name  = "AZURE_OPENAI_DEPLOYMENT"
+        value = var.openai_deployment_name
+      }
+      env {
+        name  = "KEY_VAULT_URL"
+        value = azurerm_key_vault.main.vault_uri
+      }
+      env {
+        name  = "AZURE_CLIENT_ID"
+        value = azurerm_user_assigned_identity.main.client_id
+}
+
+    }
+  }
+
+  ingress {
+    external_enabled = true
+    target_port      = 5000
+    traffic_weight {
+      percentage      = 100
+      latest_revision = true
+    }
+  }
+
+  registry {
+    server   = azurerm_container_registry.main.login_server
+    username = azurerm_container_registry.main.admin_username
+    password_secret_name = "acr-password"
+  }
+
+  secret {
+    name  = "acr-password"
+    value = azurerm_container_registry.main.admin_password
+  }
+}

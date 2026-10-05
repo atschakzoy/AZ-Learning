@@ -56,3 +56,22 @@ variable "openai_deployment_name" {
   type = string
   description = "name of the model deployment"
 }
+
+variable "acr_name" {
+  type = string
+  description = "name of the azure container registery"
+}
+variable "managed_identity_name" {
+  type = string
+  description = "name of the user assigned managed identity"
+}
+
+variable "container_app_env_name" {
+  type = string
+  description = "name of the container app environment"
+}
+
+variable "container_app_name" {
+  type = string
+  description = "name of the container app"
+}
