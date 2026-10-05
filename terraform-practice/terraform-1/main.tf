@@ -34,3 +34,28 @@ resource "azurerm_log_analytics_workspace" "main" {
   location            = azurerm_resource_group.main.location
   resource_group_name = azurerm_resource_group.main.name
 }
+
+resource "azurerm_cognitive_account" "main" {
+  name                = var.openai_name
+  location            = "swedencentral"
+  resource_group_name = azurerm_resource_group.main.name
+  kind                = "OpenAI"
+  sku_name            = "S0"
+}
+
+resource "azurerm_cognitive_deployment" "main" {
+  name = var.openai_deployment_name
+  cognitive_account_id = azurerm_cognitive_account.main.id
+
+  model {
+    format  = "OpenAI"
+    name    = "gpt-4.1-mini"
+    version = "2025-04-14"
+  }
+
+  sku {
+    name = "GlobalStandard"
+    capacity = 1
+  }
+
+}

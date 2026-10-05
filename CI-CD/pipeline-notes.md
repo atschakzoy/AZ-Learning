@@ -666,3 +666,216 @@ backendAzureRmContainerName: $(TF_CONTAINER)
 
 ---
 
+# ADO Apply Pipeline — tf-ado-prod.yml (Full File Walkthrough)
+
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform-practice/terraform-1/**
+
+pool:
+  vmImage: ubuntu-24.04
+
+jobs:
+  - deployment: apply
+    displayName: Apply to Production
+    environment: production
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - checkout: self
+
+            - task: TerraformInstaller@1
+              displayName: Install Terraform
+              inputs:
+                terraformVersion: "1.9.8"
+
+            - task: TerraformTaskV4@4
+              displayName: Terraform Init
+              inputs:
+                provider: azurerm
+                command: init
+                workingDirectory: $(System.DefaultWorkingDirectory)/terraform-practice/terraform-1
+                backendServiceArm: azure-service-connection
+                backendAzureRmResourceGroupName: rg-tfstate
+                backendAzureRmStorageAccountName: sttfstatern001
+                backendAzureRmContainerName: tfstate
+                backendAzureRmKey: terraform.tfstate
+
+            - task: TerraformTaskV4@4
+              displayName: Terraform Apply
+              inputs:
+                provider: azurerm
+                command: apply
+                workingDirectory: $(System.DefaultWorkingDirectory)/terraform-practice/terraform-1
+                environmentServiceNameAzureRM: azure-service-connection
+                commandOptions: -var-file="dev.tfvars" -auto-approve
+```
+
+---
+
+## trigger: (push to main)
+
+```yaml
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform-practice/terraform-1/**
+```
+
+- `trigger:` — fires when code is pushed (or merged via PR) to `main`
+- Different from the plan pipeline which used `trigger: none` + `pr:`
+- Plan runs on PRs. Apply runs after merge to main.
+- `paths:` — only when terraform files changed. A README change does not trigger apply.
+
+---
+
+## pool:
+
+```yaml
+pool:
+  vmImage: ubuntu-24.04
+```
+
+- Same machine as the plan pipeline. Fresh Ubuntu VM, deleted after the pipeline finishes.
+
+---
+
+## jobs: → deployment: (the approval gate job)
+
+```yaml
+jobs:
+  - deployment: apply
+    displayName: Apply to Production
+    environment: production
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+```
+
+- `jobs:` — needed because a deployment job has more structure than a flat `steps:` list
+- `- deployment: apply` — declares a deployment job named `apply`. A deployment job is the only type that can reference an ADO environment.
+- `environment: production` — links to the ADO environment you created with the approval gate. When the pipeline reaches this job, ADO pauses and waits for the required reviewer to approve before continuing.
+- `strategy: runOnce: deploy:` — required boilerplate for deployment jobs. Means "run each step once, in deploy mode". Always written exactly like this.
+- `steps:` — the actual commands start here, indented under `deploy:`
+
+**Why `deployment:` and not `job:`?**
+A regular `job:` cannot use ADO environments with approval gates. Only `deployment:` jobs can. This is the ADO equivalent of `environment: production` in GitHub Actions.
+
+---
+
+## checkout: self
+
+```yaml
+- checkout: self
+```
+
+- Downloads the repo onto the runner. Required in deployment jobs — without it there are no `.tf` files.
+- `self` = this repo (the one the pipeline lives in).
+
+---
+
+## Terraform Init (in apply pipeline)
+
+```yaml
+- task: TerraformTaskV4@4
+  displayName: Terraform Init
+  inputs:
+    provider: azurerm
+    command: init
+    workingDirectory: $(System.DefaultWorkingDirectory)/terraform-practice/terraform-1
+    backendServiceArm: azure-service-connection
+    backendAzureRmResourceGroupName: rg-tfstate
+    backendAzureRmStorageAccountName: sttfstatern001
+    backendAzureRmContainerName: tfstate
+    backendAzureRmKey: terraform.tfstate
+```
+
+- Identical to the plan pipeline init step. Must run before apply to connect to the remote state backend.
+- No validate step here — validation already happened on the PR before merge.
+
+---
+
+## Terraform Apply
+
+```yaml
+- task: TerraformTaskV4@4
+  displayName: Terraform Apply
+  inputs:
+    provider: azurerm
+    command: apply
+    workingDirectory: $(System.DefaultWorkingDirectory)/terraform-practice/terraform-1
+    environmentServiceNameAzureRM: azure-service-connection
+    commandOptions: -var-file="dev.tfvars" -auto-approve
+```
+
+- `command: apply` — runs `terraform apply`
+- `environmentServiceNameAzureRM:` — service connection for Azure access. Same key as the plan step (different from init's `backendServiceArm:` which is for storage access)
+- `-auto-approve` — skips Terraform's interactive yes/no prompt. Safe here because the human already approved via the ADO environment gate above
+
+**Two different service connection keys — why:**
+
+| Step | Input key | Purpose |
+|---|---|---|
+| Init | `backendServiceArm` | Access the storage account holding state |
+| Plan / Apply | `environmentServiceNameAzureRM` | Access Azure to read/create resources |
+
+Both point to the same `azure-service-connection` — they just serve different purposes.
+
+---
+
+# Pipeline Conventions — GitHub Actions vs ADO Side by Side
+
+| Concept | GitHub Actions | ADO |
+|---|---|---|
+| Push trigger | `on: push: branches: [main]` | `trigger: branches: include: [main]` |
+| PR trigger | `on: pull_request:` | `pr: branches: include:` |
+| No push trigger | *(omit push block)* | `trigger: none` |
+| Machine | `runs-on: ubuntu-latest` | `pool: vmImage: ubuntu-24.04` |
+| Job structure | `jobs: → job-name: → steps:` | `jobs: → job:/deployment: → steps:` or flat `steps:` |
+| Pre-built action | `uses: some-action@v2` | `task: SomeTask@1` |
+| Action inputs | `with:` | `inputs:` |
+| Step label | `name:` | `displayName:` |
+| Bash command | `run: echo hello` | `script: echo hello` |
+| Secret | `${{ secrets.MY_SECRET }}` | `$(MY_SECRET)` (from variable group or pipeline variables) |
+| Built-in variable | `${{ github.sha }}` | `$(Build.SourceVersion)` |
+| Working directory | `working-directory: path/` | `workingDirectory: $(System.DefaultWorkingDirectory)/path/` |
+| Approval gate | `environment: production` on a job | `deployment:` job + `environment: production` |
+| Auth to Azure | `permissions: id-token: write` + `azure/login@v2` | Service Connection (set in ADO UI, no YAML needed) |
+| Repo path variable | `${{ github.workspace }}` | `$(System.DefaultWorkingDirectory)` |
+
+---
+
+## Key ADO Concepts to Remember
+
+**`trigger:` vs `pr:`**
+ADO splits push and PR triggers into two separate top-level keys. GitHub Actions puts everything under one `on:` block.
+
+**Flat steps vs jobs:**
+- Plan pipeline: flat `steps:` at top level — simple, one job implied
+- Apply pipeline: `jobs: → deployment:` — required because you need an environment for approval
+
+**`task:` vs `script:`**
+- `task:` — runs a pre-built ADO task (like a marketplace action). Has `inputs:`
+- `script:` — runs raw bash commands directly. Like `run:` in GitHub Actions
+
+**`$(System.DefaultWorkingDirectory)`**
+The ADO built-in variable that points to the root of your checked-out repo. Always use this as the base for `workingDirectory:`.
+
+**Service Connection replaces everything in GitHub OIDC setup:**
+In GitHub you had to: create App Registration → add federated credential → add 3 secrets → add `permissions: id-token: write`. In ADO, a Service Connection handles all of this automatically — you just reference its name.
+
+**Pipeline registration:**
+GitHub Actions auto-discovers any `.yml` file in `.github/workflows/`. ADO does not — you manually register each pipeline file in the ADO UI pointing to its path in the repo.
+
+---
+

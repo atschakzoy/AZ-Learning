@@ -8,3 +8,5 @@ key_vault_name               = "kv-tfexample001"
 rbac_authorization_enabled   = true
 keyvault_sku_name            = "standard"
 log_analytics_workspace_name = "law-tfexample"
+openai_name = "oai-dev-rn001"
+openai_deployment_name = "gpt-4-1-mini"

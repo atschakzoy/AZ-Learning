@@ -835,6 +835,52 @@ Watch the deletion in the Azure Portal under "Notifications" (bell icon).
 - **Cloud Shell** = zero-setup, always authenticated, great for exploration
 - **Portal** = great for learning and debugging, not for repeatable work
 
+### Azure OpenAI / Cognitive Services
+
+```bash
+# List available models in a region
+az cognitiveservices account list-models \
+  --name <account-name> \
+  --resource-group <rg> \
+  --output table
+
+# Get API keys for a Cognitive Services / OpenAI account
+az cognitiveservices account keys list \
+  --name <account-name> \
+  --resource-group <rg>
+
+# Get just the primary key (for scripts / .env files)
+az cognitiveservices account keys list \
+  --name <account-name> \
+  --resource-group <rg> \
+  --query key1 \
+  --output tsv
+
+# Regenerate a key (key1 or key2)
+az cognitiveservices account keys regenerate \
+  --name <account-name> \
+  --resource-group <rg> \
+  --key-name key1
+
+# Get the endpoint URL
+az cognitiveservices account show \
+  --name <account-name> \
+  --resource-group <rg> \
+  --query properties.endpoint \
+  --output tsv
+
+# List all Cognitive Services / OpenAI accounts in a resource group
+az cognitiveservices account list \
+  --resource-group <rg> \
+  --output table
+
+# List model deployments on an account
+az cognitiveservices account deployment list \
+  --name <account-name> \
+  --resource-group <rg> \
+  --output table
+```
+
 ---
 
 ## Resources
