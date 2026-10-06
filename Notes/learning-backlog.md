@@ -58,6 +58,27 @@ Every route is a Python function. Flask calls that function when a request hits 
 
 **When to use Flask vs FastAPI:** Flask for simple scripts and learning. FastAPI for anything you're building seriously today.
 
+**What Flask actually creates — and what it's called:**
+
+Flask is a framework, not a server. What Flask produces is called a **REST API** (also called an **API server**, **backend server**, or **web server** — all the same thing in casual usage).
+
+The actual server that listens for connections and passes requests into Flask is separate:
+
+| Environment | Server | How |
+|-------------|--------|-----|
+| Development | Flask's built-in dev server | `app.run()` — one request at a time, not for production |
+| Production | **Gunicorn** (WSGI server) | `gunicorn main:app` — handles many requests in parallel |
+
+```
+Internet
+    ↓
+Gunicorn        ← the actual HTTP server (listens on a port, manages connections)
+    ↓
+Flask           ← your logic (routes, calls Azure, returns response)
+```
+
+Flask uses **WSGI** (Web Server Gateway Interface) — the standard interface between Python web frameworks and web servers.
+
 ---
 
 ## 3. FastAPI
@@ -112,6 +133,33 @@ def chat(body: ChatRequest):
 8. Containerizing with Docker and deploying to Azure Container Apps
 
 **Best resource:** Official FastAPI docs — `fastapi.tiangolo.com` — best written docs of any Python framework, do the tutorial top to bottom.
+
+**What FastAPI actually creates — and what it's called:**
+
+Same as Flask — FastAPI is a framework, not a server. What it produces is a **REST API** (also called **API server** or **backend server**).
+
+FastAPI runs on an **ASGI server** (Async Server Gateway Interface — the modern async version of WSGI):
+
+| Environment | Server | How |
+|-------------|--------|-----|
+| Development | Uvicorn with `--reload` | `uvicorn main:app --reload` — restarts on file changes |
+| Production | **Uvicorn** or **Gunicorn + Uvicorn workers** | handles many async requests in parallel |
+
+```
+Internet
+    ↓
+Uvicorn         ← the actual HTTP server (async, handles many connections at once)
+    ↓
+FastAPI         ← your logic (routes, validation, calls Azure, returns response)
+```
+
+**Flask vs FastAPI — the server difference:**
+
+| | Flask | FastAPI |
+|--|-------|---------|
+| Interface | WSGI (synchronous) | ASGI (asynchronous) |
+| Production server | Gunicorn | Uvicorn |
+| Handles async | No (by default) | Yes — can await calls to Azure OpenAI without blocking |
 
 ---
 
@@ -317,6 +365,118 @@ Decorators (`@Controller`, `@Post`, `@Body`) are NestJS's way of declaring what 
 7. Deploying to Azure
 
 **Best resource:** Official NestJS docs — `docs.nestjs.com`
+
+---
+
+## 8. API Types — REST and the Others
+
+Flask and FastAPI both create **REST APIs** by default. REST is not the only type of API — here are all the main ones and when you'll encounter them.
+
+---
+
+### REST — Representational State Transfer
+
+The most common API style by far. Built on standard HTTP.
+
+**The rules:**
+- URLs represent resources (things): `/chat`, `/users`, `/models`
+- HTTP methods represent actions: GET = read, POST = create, PUT = update, DELETE = remove
+- Data is exchanged in JSON
+- Stateless — every request is self-contained, server remembers nothing between calls
+
+**Example:**
+```
+POST /chat
+{"message": "What is a resource group?"}
+
+→ 200 OK
+{"reply": "A resource group is a container..."}
+```
+
+Used by: Azure, OpenAI, GitHub, Stripe, almost every modern API you'll call.
+
+---
+
+### GraphQL
+
+Instead of many fixed endpoints, you have one endpoint and the client asks for exactly the fields it needs — nothing more, nothing less.
+
+**REST problem it solves:** With REST you might call `/user` and get 20 fields back but only need 3. With GraphQL you ask for exactly those 3.
+
+```graphql
+query {
+  user(id: "123") {
+    name
+    email
+  }
+}
+```
+
+Used by: GitHub API v4, Shopify, Meta (Facebook/Instagram).
+You'll encounter it — not something you need to build yourself soon.
+
+---
+
+### gRPC
+
+A high-performance binary protocol. Much faster than REST but harder to work with. Uses HTTP/2 and a schema definition language called Protocol Buffers.
+
+Used by: Google internal services, Kubernetes, microservices that talk to each other inside a company where speed matters.
+You'll see it mentioned in cloud architecture — not something you'll build early on.
+
+---
+
+### WebSocket
+
+A persistent two-way connection — unlike REST where you send a request and get one response, WebSocket keeps the connection open and either side can send messages at any time.
+
+**Why it matters for AI apps:** When you stream an LLM response token by token (the typing effect in ChatGPT), that's either WebSocket or a simpler version called **Server-Sent Events (SSE)**.
+
+```python
+# FastAPI streaming response — SSE
+from fastapi.responses import StreamingResponse
+
+@app.post("/chat/stream")
+async def chat_stream(body: ChatRequest):
+    async def generate():
+        async for chunk in call_openai_stream(body.prompt):
+            yield chunk
+    return StreamingResponse(generate(), media_type="text/event-stream")
+```
+
+Used by: Chat apps, live dashboards, streaming AI responses.
+
+---
+
+### SOAP
+
+Old XML-based protocol, very verbose and complex. Was the standard before REST took over.
+
+```xml
+<soap:Envelope>
+  <soap:Body>
+    <GetUser>
+      <UserId>123</UserId>
+    </GetUser>
+  </soap:Body>
+</soap:Envelope>
+```
+
+Used by: Banks, government systems, old enterprise software. You'll encounter it in legacy integrations — avoid building new things with it.
+
+---
+
+### Summary — API types at a glance
+
+| Type | Format | When you'll use it |
+|------|--------|--------------------|
+| **REST** | JSON over HTTP | Everything — daily use |
+| **GraphQL** | JSON over HTTP (one endpoint) | GitHub API, Shopify |
+| **gRPC** | Binary over HTTP/2 | Kubernetes, internal microservices |
+| **WebSocket** | Persistent connection | Streaming LLM responses, live chat |
+| **SOAP** | XML over HTTP | Legacy enterprise/banking systems |
+
+**For your path:** REST is what you build. WebSocket (or SSE) is what you'll add when you want streaming LLM responses. The others you'll encounter but not build yourself for a long time.
 
 ---
 

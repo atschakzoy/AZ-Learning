@@ -459,6 +459,93 @@ pip install python-dotenv
 
 Always add `.env` to `.gitignore` so secrets never get committed.
 
+---
+
+## What is an SDK?
+
+**SDK = Software Development Kit**
+
+An SDK is a ready-made library (a package you install) that a company builds so you can talk to their service without doing all the hard work yourself.
+
+### The problem without an SDK
+
+Every cloud service (Azure OpenAI, AWS S3, GitHub, etc.) exposes an **API** — a set of HTTP endpoints you can call. You *could* talk to them manually:
+
+```python
+import requests
+
+response = requests.post(
+    "https://my-endpoint.openai.azure.com/openai/deployments/my-gpt4o/chat/completions?api-version=2024-06-01",
+    headers={
+        "Content-Type": "application/json",
+        "api-key": "abc123..."
+    },
+    json={
+        "messages": [{"role": "user", "content": "Hello"}],
+        "temperature": 0.7,
+        "max_tokens": 500
+    }
+)
+
+data = response.json()
+print(data["choices"][0]["message"]["content"])
+```
+
+This works — but it's verbose, error-prone, and you have to know every URL, header, and JSON field by heart.
+
+### The solution: SDK
+
+The SDK wraps all of that into clean, simple function calls:
+
+```python
+from openai import AzureOpenAI
+
+client = AzureOpenAI(endpoint="...", api_key="...")
+
+response = client.chat.completions.create(
+    model="my-gpt4o",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+
+print(response.choices[0].message.content)
+```
+
+Same result. But the SDK handles the URL, headers, JSON structure, and error parsing for you.
+
+### API vs SDK — what's the difference?
+
+| | API | SDK |
+|---|---|---|
+| **What it is** | The interface/endpoints the service exposes | A library that calls those endpoints for you |
+| **Format** | HTTP requests (URLs, headers, JSON) | Python/JS/etc. functions and objects |
+| **Who makes it** | The service provider | Usually the same provider |
+| **You need to know** | Every URL, header, body field | Just the function names |
+
+**Simple analogy:**
+- **API** = a restaurant's menu (defines what you can order and how)
+- **SDK** = a waiter (takes your order and handles the communication for you)
+
+You end up with the same food either way — but the waiter makes it much easier.
+
+### Why SDKs matter in DevOps/Cloud
+
+In your project you used:
+- `openai` SDK → talks to Azure OpenAI API
+- `azure-identity` SDK → handles Azure authentication
+- `azure.mgmt.resource` SDK → manages Azure resources from Python
+
+Without these SDKs, every one of those interactions would be manual HTTP requests. SDKs are what make working with cloud services practical.
+
+### Key points to remember
+
+- An API is a **contract** — "here's how you can talk to my service"
+- An SDK is a **tool** — "here's a library that makes talking to my service easy"
+- Every SDK wraps an API under the hood
+- You install SDKs via `pip install` (Python) or `npm install` (Node.js)
+- SDKs are maintained by the provider, so they stay up to date with API changes
+
+---
+
 ### `openai` — OpenAI and Azure OpenAI SDK
 
 The official Python SDK. Works with both OpenAI and Azure OpenAI.

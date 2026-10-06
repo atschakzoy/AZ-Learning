@@ -56,22 +56,34 @@ variable "openai_deployment_name" {
   type = string
   description = "name of the model deployment"
 }
-
-variable "acr_name" {
-  type = string
-  description = "name of the azure container registery"
-}
-variable "managed_identity_name" {
-  type = string
-  description = "name of the user assigned managed identity"
+variable "app_service_plan_name" {
+  type        = string
+  description = "name of the App Service Plan"
 }
 
-variable "container_app_env_name" {
-  type = string
-  description = "name of the container app environment"
+variable "app_service_name" {
+  type        = string
+  description = "name of the App Service"
 }
 
-variable "container_app_name" {
-  type = string
-  description = "name of the container app"
-}
+
+# --- Stage 9: Containers (commented out for Stage 6 App Service) ---
+# variable "acr_name" {
+#   type        = string
+#   description = "name of the azure container registry"
+# }
+
+# variable "managed_identity_name" {
+#   type        = string
+#   description = "name of the user assigned managed identity"
+# }
+
+# variable "container_app_env_name" {
+#   type        = string
+#   description = "name of the container app environment"
+# }
+
+# variable "container_app_name" {
+#   type        = string
+#   description = "name of the container app"
+# }
