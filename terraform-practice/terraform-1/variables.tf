@@ -48,12 +48,12 @@ variable "log_analytics_workspace_name" {
 }
 
 variable "openai_name" {
-  type = string
+  type        = string
   description = "name of the AZure OpenAI resource"
 }
 
 variable "openai_deployment_name" {
-  type = string
+  type        = string
   description = "name of the model deployment"
 }
 variable "app_service_plan_name" {

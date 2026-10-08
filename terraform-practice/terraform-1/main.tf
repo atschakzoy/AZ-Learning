@@ -44,7 +44,7 @@ resource "azurerm_cognitive_account" "main" {
 }
 
 resource "azurerm_cognitive_deployment" "main" {
-  name = var.openai_deployment_name
+  name                 = var.openai_deployment_name
   cognitive_account_id = azurerm_cognitive_account.main.id
 
   model {
@@ -54,7 +54,7 @@ resource "azurerm_cognitive_deployment" "main" {
   }
 
   sku {
-    name = "GlobalStandard"
+    name     = "GlobalStandard"
     capacity = 1
   }
 

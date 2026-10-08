@@ -1,5 +1,5 @@
 output "openai_endpoint" {
-    value = azurerm_cognitive_account.main.endpoint
+  value = azurerm_cognitive_account.main.endpoint
 }
 
 output "app_service_url" {
