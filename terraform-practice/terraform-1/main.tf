@@ -106,6 +106,31 @@ resource "azurerm_role_assignment" "app_openai_user" {
   principal_id         = azurerm_linux_web_app.main.identity[0].principal_id
 }
 
+resource "azurerm_linux_web_app_slot" "staging" {
+  name           = "staging"
+  app_service_id = azurerm_linux_web_app.main.id
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  site_config {
+    always_on = false
+    application_stack {
+      python_version = "3.12"
+    }
+    app_command_line = "gunicorn --bind=0.0.0.0 --timeout 600 main:app"
+  }
+
+  app_settings = {
+    AZURE_OPENAI_ENDPOINT          = azurerm_cognitive_account.main.endpoint
+    AZURE_OPENAI_DEPLOYMENT        = var.openai_deployment_name
+    KEY_VAULT_URL                  = azurerm_key_vault.main.vault_uri
+    SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
+  }
+}
+
+
 # --- Stage 9: Containers (commented out for Stage 6 App Service) ---
 # resource "azurerm_container_registry" "main" {
 #   name = var.acr_name
