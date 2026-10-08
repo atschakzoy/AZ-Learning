@@ -1,0 +1,67 @@
+name: App Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'App/**'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build artifact
+        working-directory: App
+        run: zip app.zip main.py requirements.txt
+
+      - name: Deploy to dev App Service
+        working-directory: App
+        run: |
+          az webapp deploy \
+            --resource-group rg-tfexample-dev-rn \
+            --name app-ai-dev-rn001 \
+            --src-path app.zip \
+            --type zip
+
+  deploy-prod:
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build artifact
+        working-directory: App
+        run: zip app.zip main.py requirements.txt
+
+      - name: Deploy to prod App Service
+        working-directory: App
+        run: |
+          az webapp deploy \
+            --resource-group rg-tfexample-prod-rn \
+            --name app-ai-prod-rn001 \
+            --src-path app.zip \
+            --type zip

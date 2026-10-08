@@ -855,6 +855,336 @@ Both point to the same `azure-service-connection` — they just serve different 
 
 ---
 
+# Multi-Environment Pipelines — Stage 7 Extension
+
+## Why Separate Environments
+
+One set of Terraform code, two environments (dev and prod). Dev is where you test changes. Prod is what real users hit. The pipeline automates both — dev deploys automatically, prod requires a human to approve.
+
+```
+PR opened
+    ↓
+tf-plan.yml runs plan for BOTH dev and prod → posts two comments on the PR
+    ↓
+PR approved and merged
+    ↓
+tf-apply.yml applies dev automatically
+    ↓
+Human approves in GitHub UI
+    ↓
+tf-apply.yml applies prod
+```
+
+---
+
+## prod.tfvars — What It Is and Why
+
+`dev.tfvars` and `prod.tfvars` are the only files that differ between environments. The Terraform code (`main.tf`, `variables.tf`, etc.) is identical — the var files control what gets built.
+
+| File | Environment | Resource names |
+|---|---|---|
+| `dev.tfvars` | dev | `rg-tfexample-dev-rn`, `app-ai-dev-rn001`, etc. |
+| `prod.tfvars` | prod | `rg-tfexample-prod-rn`, `app-ai-prod-rn001`, etc. |
+
+**Rule:** Every resource with a globally unique name (Key Vault, Storage Account, App Service) must have a different name in prod.tfvars. The resource group name is built automatically in main.tf using the `environment` variable so it doesn't need to be changed manually.
+
+---
+
+## Separate State Files Per Environment
+
+Both dev and prod Terraform share the same backend (Azure Storage), but they must use **different state file keys** — otherwise applying prod would overwrite the dev state.
+
+| Environment | State key |
+|---|---|
+| dev | `dev/terraform.tfstate` |
+| prod | `prod/terraform.tfstate` |
+
+The `provider.tf` backend block has the key hardcoded. You override it at pipeline runtime by passing `-backend-config` during `terraform init`:
+
+```bash
+# dev job
+terraform init -backend-config="key=dev/terraform.tfstate"
+
+# prod job
+terraform init -backend-config="key=prod/terraform.tfstate"
+```
+
+This overrides only the key — everything else (resource group, storage account, container) stays the same as in `provider.tf`.
+
+---
+
+## Matrix Strategy — Run the Same Job for Multiple Environments
+
+Instead of copy-pasting the entire plan job twice, use a matrix. GitHub Actions runs the whole job once per matrix value.
+
+**Original (dev only):**
+```yaml
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Terraform Init
+        run: terraform init                                        # ← hardcoded, uses key from provider.tf
+
+      - name: Terraform Plan
+        run: terraform plan -var-file="dev.tfvars" -no-color      # ← hardcoded to dev
+```
+
+**Extended (dev + prod with matrix):**
+```yaml
+jobs:
+  plan:
+    strategy:
+      matrix:
+        environment: [dev, prod]                                   # ← THIS IS NEW
+    runs-on: ubuntu-latest
+    steps:
+      - name: Terraform Init
+        run: terraform init -backend-config="key=${{ matrix.environment }}/terraform.tfstate"   # ← THIS CHANGED
+
+      - name: Terraform Plan
+        run: terraform plan -var-file="${{ matrix.environment }}.tfvars" -no-color              # ← THIS CHANGED
+```
+
+**What changed and why:**
+| Line | Before | After | Why |
+|---|---|---|---|
+| `strategy: matrix:` | not there | `environment: [dev, prod]` | tells GitHub to run the job twice — once per value |
+| `terraform init` | no `-backend-config` | `-backend-config="key=dev/terraform.tfstate"` or `prod/...` | each environment needs its own state file |
+| `terraform plan` | `-var-file="dev.tfvars"` | `-var-file="dev.tfvars"` or `"prod.tfvars"` | each environment uses its own variable values |
+| PR comment label | `Terraform Plan Result` | `Terraform Plan — dev` / `Terraform Plan — prod` | reviewer sees which environment each comment belongs to |
+
+- `matrix.environment` is `dev` on the first run and `prod` on the second
+- Both runs happen **in parallel** — the PR gets two comments at the same time
+- No duplication — one job definition handles both
+
+---
+
+## Sequential Jobs with `needs:` — Dev Before Prod
+
+The apply workflow needs two jobs that run **in order** — dev first, then prod only if dev succeeded.
+
+**Original (single job, dev only):**
+```yaml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production          # ← only one environment, waits for approval
+    steps:
+      - run: terraform apply -var-file="dev.tfvars" -auto-approve   # ← hardcoded to dev
+```
+
+**Extended (two jobs, dev then prod):**
+```yaml
+jobs:
+  apply-dev:                         # ← THIS IS NEW (renamed from apply)
+    runs-on: ubuntu-latest
+    environment: development         # ← THIS CHANGED — no approval needed, runs automatically
+    steps:
+      - run: terraform apply -var-file="dev.tfvars" -auto-approve   # ← same as before
+
+  apply-prod:                        # ← THIS IS ENTIRELY NEW
+    needs: apply-dev                 # ← waits for apply-dev to finish successfully
+    runs-on: ubuntu-latest
+    environment: production          # ← pauses and waits for manual approval in GitHub UI
+    steps:
+      - run: terraform apply -var-file="prod.tfvars" -auto-approve
+```
+
+**What changed and why:**
+| | Before | After | Why |
+|---|---|---|---|
+| Number of jobs | 1 (`apply`) | 2 (`apply-dev`, `apply-prod`) | dev and prod are independent deployments |
+| `environment:` on dev | `production` (with approval) | `development` (no approval) | dev should deploy automatically — no gating needed |
+| `needs:` | not there | `needs: apply-dev` on the prod job | prod must wait for dev to succeed first |
+| var file in prod job | not there | `-var-file="prod.tfvars"` | prod uses its own variable values |
+
+- `needs: apply-dev` — if dev apply fails, prod **never runs**. Prevents deploying broken code to prod.
+- `environment: development` — a GitHub Environment with NO required reviewers. Job starts immediately.
+- `environment: production` — a GitHub Environment WITH a required reviewer. Pipeline pauses here and shows an approval button in the GitHub UI.
+
+**Both GitHub Environments must be created manually:** GitHub repo → Settings → Environments. `development` = no reviewers. `production` = add yourself as required reviewer.
+
+---
+
+## App Pipelines — app-ci.yml and app-deploy.yml
+
+### Why app pipelines are separate from terraform pipelines
+
+Terraform pipelines manage Azure infrastructure. App pipelines manage your code. They are kept separate because:
+- A code change (fixing a bug in `main.py`) should never re-apply Terraform
+- An infra change (adding a new resource) should never redeploy the app
+- Each pipeline watches its own `paths:` — Terraform watches `terraform-practice/terraform-1/**`, app watches `App/**`
+
+---
+
+### app-ci.yml — Runs on every PR that changes App/ files
+
+```yaml
+name: App CI
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'App/**'              # only runs when App/ files change
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"       # same version as App Service
+
+      - name: Install dependencies
+        working-directory: App
+        run: pip install -r requirements.txt   # fails if a package doesn't exist
+
+      - name: Build deployment artifact
+        working-directory: App
+        run: zip app.zip main.py requirements.txt   # same zip you built manually
+```
+
+**What each step does:**
+| Step | What it catches |
+|---|---|
+| `setup-python` | Ensures the right Python version is available |
+| `pip install` | Fails fast if any package in requirements.txt is broken or missing |
+| `zip` | Confirms the artifact can be built — same zip that deploy will use |
+
+No Azure login needed — CI only checks code, it never touches Azure.
+
+---
+
+### app-deploy.yml — Runs on merge to main when App/ files change
+
+```yaml
+name: App Deploy
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'App/**'
+
+permissions:
+  id-token: write       # needed for Azure OIDC login
+  contents: read
+
+jobs:
+  deploy-dev:
+    runs-on: ubuntu-latest
+    environment: development    # no approval — auto-deploys
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2    # OIDC login
+      - name: Build artifact
+        working-directory: App
+        run: zip app.zip main.py requirements.txt
+      - name: Deploy to dev App Service
+        working-directory: App
+        run: |
+          az webapp deploy \
+            --resource-group rg-tfexample-dev-rn \
+            --name app-ai-dev-rn001 \
+            --src-path app.zip \
+            --type zip
+
+  deploy-prod:
+    needs: deploy-dev           # waits for dev to succeed
+    runs-on: ubuntu-latest
+    environment: production     # pauses for manual approval
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+      - name: Build artifact
+        working-directory: App
+        run: zip app.zip main.py requirements.txt
+      - name: Deploy to prod App Service
+        working-directory: App
+        run: |
+          az webapp deploy \
+            --resource-group rg-tfexample-prod-rn \
+            --name app-ai-prod-rn001 \
+            --src-path app.zip \
+            --type zip
+```
+
+**Key differences from tf-apply.yml:**
+| | tf-apply.yml | app-deploy.yml |
+|---|---|---|
+| What it deploys | Terraform infrastructure | App code (zip file) |
+| How it deploys | `terraform apply` | `az webapp deploy` |
+| State file | yes — separate per environment | no state file, stateless deploy |
+| Checkout needed | yes | yes |
+| Azure login needed | yes | yes |
+| Same dev→prod pattern | yes | yes |
+
+**Why `az webapp deploy` instead of Terraform:**
+Terraform manages the existence of the App Service (creates it, configures it). `az webapp deploy` pushes your code into it. They do different things — Terraform is for infrastructure, `az webapp deploy` is for code.
+
+---
+
+## tf-apply.yml — Full Before/After for Multi-Environment
+
+**Before (single job, dev only):**
+```yaml
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: production          # approval gate on the only job
+    env:
+      ARM_CLIENT_ID: ...
+    steps:
+      - checkout, login, install terraform
+      - run: terraform init                              # no backend-config — uses key from provider.tf
+      - run: terraform apply -var-file="dev.tfvars" -auto-approve   # hardcoded to dev
+```
+
+**After (two sequential jobs, dev auto → prod with approval):**
+```yaml
+jobs:
+  apply-dev:                         # renamed — handles dev only
+    runs-on: ubuntu-latest
+    environment: development         # no required reviewer — runs automatically after merge
+    env:
+      ARM_CLIENT_ID: ...
+    steps:
+      - checkout, login, install terraform
+      - run: terraform init -backend-config="key=dev/terraform.tfstate"
+      - run: terraform apply -var-file="dev.tfvars" -auto-approve
+
+  apply-prod:                        # entirely new job
+    needs: apply-dev                 # does not start until apply-dev succeeds
+    runs-on: ubuntu-latest
+    environment: production          # approval gate — human must approve in GitHub UI
+    env:
+      ARM_CLIENT_ID: ...
+    steps:
+      - checkout, login, install terraform
+      - run: terraform init -backend-config="key=prod/terraform.tfstate"
+      - run: terraform apply -var-file="prod.tfvars" -auto-approve
+```
+
+**What changed and why:**
+
+| What | Before | After | Why |
+|---|---|---|---|
+| Number of jobs | 1 (`apply`) | 2 (`apply-dev`, `apply-prod`) | dev and prod are separate deployments |
+| Dev approval gate | yes (was `production`) | no (`development`, no reviewers) | dev should auto-deploy on every merge |
+| `needs:` on prod | not there | `needs: apply-dev` | prod only runs if dev succeeds — broken code never reaches prod |
+| `terraform init` | no `-backend-config` | `key=dev/...` and `key=prod/...` | each environment needs its own state file |
+| Prod job | not there | full job with prod var file | prod infrastructure is managed separately from dev |
+
+**Why the approval gate moved:**
+In the original, the single `apply` job had `environment: production` which required approval even for dev. Now `apply-dev` uses `environment: development` (no approval) and only `apply-prod` uses `environment: production` (approval required). Dev deploys fast, prod deploys safely.
+
+---
+
 ## Key ADO Concepts to Remember
 
 **`trigger:` vs `pr:`**

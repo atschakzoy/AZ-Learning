@@ -11,9 +11,9 @@ permissions:
   contents: read
 
 jobs:
-  apply:
+  apply-dev:
     runs-on: ubuntu-latest
-    environment: production
+    environment: development
     env:
       ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
@@ -38,8 +38,41 @@ jobs:
 
       - name: Terraform Init
         working-directory: terraform-practice/terraform-1
-        run: terraform init
+        run: terraform init -backend-config="key=dev/terraform.tfstate"
 
       - name: Terraform Apply
         working-directory: terraform-practice/terraform-1
         run: terraform apply -var-file="dev.tfvars" -auto-approve
+        
+  apply-prod:
+    needs: apply-dev
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC: "true"
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.9"
+
+      - name: Terraform Init
+        working-directory: terraform-practice/terraform-1
+        run: terraform init -backend-config="key=prod/terraform.tfstate"
+
+      - name: Terraform Apply
+        working-directory: terraform-practice/terraform-1
+        run: terraform apply -var-file="prod.tfvars" -auto-approve
