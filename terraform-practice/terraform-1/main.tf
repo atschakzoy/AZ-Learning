@@ -129,6 +129,18 @@ resource "azurerm_linux_web_app_slot" "staging" {
     SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
   }
 }
+resource "azurerm_role_assignment" "staging_kv_secrets_user" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app_slot.staging.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "staging_openai_user" {
+  scope                = azurerm_cognitive_account.main.id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = azurerm_linux_web_app_slot.staging.identity[0].principal_id
+}
+
 
 
 # --- Stage 9: Containers (commented out for Stage 6 App Service) ---
