@@ -148,6 +148,7 @@ resource "azurerm_role_assignment" "staging_openai_user" {
 }
 
 # --- Stage 8: Networking ---
+# VNet, subnets, NSGs, private endpoints, private DNS zones
 
 resource "azurerm_virtual_network" "main" {
   name                = var.vnet_name
