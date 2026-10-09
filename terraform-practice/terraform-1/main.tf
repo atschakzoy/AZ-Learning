@@ -96,7 +96,6 @@ resource "azurerm_linux_web_app" "main" {
     AZURE_OPENAI_DEPLOYMENT        = var.openai_deployment_name
     KEY_VAULT_URL                  = azurerm_key_vault.main.vault_uri
     SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
-    WEBSITE_VNET_ROUTE_ALL         = "1" # ← added this also for networking
   }
 }
 
@@ -148,7 +147,7 @@ resource "azurerm_role_assignment" "staging_openai_user" {
 }
 
 # --- Stage 8: Networking ---
-# VNet, subnets, NSGs, private endpoints, private DNS zones
+# VNet, subnets, NSGs, private endpoints, private DNS zones, VNet integration
 
 resource "azurerm_virtual_network" "main" {
   name                = var.vnet_name
