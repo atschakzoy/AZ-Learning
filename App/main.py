@@ -22,7 +22,7 @@ kv_client = SecretClient(
     credential=credential
 )
 
-api_key = kv_client.get_secret("openai-key").value
+api_key = kv_client.get_secret("openai-api-key").value
 
 client = AzureOpenAI(
     api_key=api_key,
@@ -40,7 +40,7 @@ def chat():
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return jsonify({"response": response.choices[0].message.content})
+    return jsonify({"response": response.choices[0].message.content, "version": "v2"})
 
 if __name__ == "__main__":
    app.run(host="0.0.0.0", debug=True)
