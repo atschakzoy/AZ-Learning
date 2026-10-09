@@ -21,12 +21,12 @@ resource "azurerm_storage_container" "main" {
 }
 
 resource "azurerm_key_vault" "main" {
-  name                       = var.key_vault_name
-  location                   = azurerm_resource_group.main.location
-  resource_group_name        = azurerm_resource_group.main.name
-  rbac_authorization_enabled = var.rbac_authorization_enabled
-  tenant_id                  = data.azurerm_client_config.current.tenant_id
-  sku_name                   = var.keyvault_sku_name
+  name                          = var.key_vault_name
+  location                      = azurerm_resource_group.main.location
+  resource_group_name           = azurerm_resource_group.main.name
+  rbac_authorization_enabled    = var.rbac_authorization_enabled
+  tenant_id                     = data.azurerm_client_config.current.tenant_id
+  sku_name                      = var.keyvault_sku_name
   public_network_access_enabled = false ##added for the networking part
 
 }
@@ -38,11 +38,11 @@ resource "azurerm_log_analytics_workspace" "main" {
 }
 
 resource "azurerm_cognitive_account" "main" {
-  name                = var.openai_name
-  location            = "swedencentral"
-  resource_group_name = azurerm_resource_group.main.name
-  kind                = "OpenAI"
-  sku_name            = "S0"
+  name                          = var.openai_name
+  location                      = "swedencentral"
+  resource_group_name           = azurerm_resource_group.main.name
+  kind                          = "OpenAI"
+  sku_name                      = "S0"
   public_network_access_enabled = false #added for the netwroking part
 
 }
@@ -73,11 +73,11 @@ resource "azurerm_service_plan" "main" {
 }
 
 resource "azurerm_linux_web_app" "main" {
-  name                = var.app_service_name
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  service_plan_id     = azurerm_service_plan.main.id
-  virtual_network_subnet_id = azurerm_subnet.app_service_integration.id  # ← added this for networking
+  name                      = var.app_service_name
+  resource_group_name       = azurerm_resource_group.main.name
+  location                  = azurerm_resource_group.main.location
+  service_plan_id           = azurerm_service_plan.main.id
+  virtual_network_subnet_id = azurerm_subnet.app_service_integration.id # ← added this for networking
 
   identity {
     type = "SystemAssigned"
@@ -96,7 +96,7 @@ resource "azurerm_linux_web_app" "main" {
     AZURE_OPENAI_DEPLOYMENT        = var.openai_deployment_name
     KEY_VAULT_URL                  = azurerm_key_vault.main.vault_uri
     SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
-     WEBSITE_VNET_ROUTE_ALL         = "1"  # ← added this also for networking
+    WEBSITE_VNET_ROUTE_ALL         = "1" # ← added this also for networking
   }
 }
 
