@@ -96,7 +96,6 @@ resource "azurerm_linux_web_app" "main" {
     AZURE_OPENAI_DEPLOYMENT        = var.openai_deployment_name
     KEY_VAULT_URL                  = azurerm_key_vault.main.vault_uri
     SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
-    WEBSITE_VNET_ROUTE_ALL         = "1" # ← added this also for networking
   }
 }
 
