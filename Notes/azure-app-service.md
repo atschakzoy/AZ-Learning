@@ -222,6 +222,112 @@ App Service URL format: `https://<app-name>.azurewebsites.net`
 
 ---
 
+## Deployment Slots
+
+A deployment slot is a second version of your App Service running in parallel on the same App Service Plan. Used for zero-downtime deployments.
+
+### Requirements
+- App Service Plan must be **S1 or higher** — F1 (Free) does not support slots
+- Both slots (production + staging) run on the same plan — same compute, same region, same cost tier
+
+### How it works
+```
+production slot → live traffic (100%)
+staging slot    → new version, no traffic (0%)
+
+after swap:
+production slot → was staging (new version, now gets 100% traffic)
+staging slot    → was production (old version, gets 0% traffic)
+```
+
+Swap is instant — Azure just reroutes traffic. No downtime, no new server.
+
+### Terraform resource for a staging slot
+```hcl
+resource "azurerm_linux_web_app_slot" "staging" {
+  name           = "staging"
+  app_service_id = azurerm_linux_web_app.main.id
+
+  identity {
+    type = "SystemAssigned"
+  }
+
+  site_config {
+    always_on = false
+    application_stack {
+      python_version = "3.12"
+    }
+    app_command_line = "gunicorn --bind=0.0.0.0 --timeout 600 main:app"
+  }
+
+  app_settings = {
+    AZURE_OPENAI_ENDPOINT          = azurerm_cognitive_account.main.endpoint
+    AZURE_OPENAI_DEPLOYMENT        = var.openai_deployment_name
+    KEY_VAULT_URL                  = azurerm_key_vault.main.vault_uri
+    SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
+  }
+}
+```
+
+> The staging slot has its own **separate managed identity** — you must assign Key Vault and OpenAI roles to it separately, the same as the production slot.
+
+### Role assignments for staging slot (must add to Terraform)
+```hcl
+resource "azurerm_role_assignment" "staging_kv_secrets_user" {
+  scope                = azurerm_key_vault.main.id
+  role_definition_name = "Key Vault Secrets User"
+  principal_id         = azurerm_linux_web_app_slot.staging.identity[0].principal_id
+}
+
+resource "azurerm_role_assignment" "staging_openai_user" {
+  scope                = azurerm_cognitive_account.main.id
+  role_definition_name = "Cognitive Services OpenAI User"
+  principal_id         = azurerm_linux_web_app_slot.staging.identity[0].principal_id
+}
+```
+
+### Deploy to staging slot
+```bash
+az webapp deploy \
+  --resource-group <rg-name> \
+  --name <app-name> \
+  --slot staging \
+  --src-path app.zip \
+  --type zip
+```
+
+No `--slot` flag = deploys to production slot.
+
+### Test staging before swap
+Staging URL format: `https://<app-name>-staging.azurewebsites.net`
+
+```bash
+curl -X POST https://<app-name>-staging.azurewebsites.net/chat \
+  -H "Content-Type: application/json" \
+  -d '{"prompt": "say hello"}'
+```
+
+### Swap staging → production
+```bash
+az webapp deployment slot swap \
+  --resource-group <rg-name> \
+  --name <app-name> \
+  --slot staging \
+  --target-slot production
+```
+
+After swap: production has the new version, staging has the old version.
+
+### Check slot status in portal
+**App Services** → click your app → left sidebar → **Deployment slots**
+Shows both slots, their status, and traffic percentage.
+
+### Real-world pattern
+- Dev environment: deploy directly to production slot (no staging needed — dev is not customer-facing)
+- Prod environment: deploy to staging slot → approval → swap to production
+
+---
+
 ## State Drift — Manual Deletion Outside Terraform
 
 If you delete resources via `az group delete` or Azure Portal, the Terraform state file still lists them as existing. On the next apply, Terraform tries to read/update them and gets 404.
