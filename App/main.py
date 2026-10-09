@@ -40,7 +40,7 @@ def chat():
         messages=[{"role": "user", "content": prompt}]
     )
 
-    return jsonify({"response": response.choices[0].message.content, "version": "v2"})
+    return jsonify({"response": response.choices[0].message.content, "version": "v3"})
 
 if __name__ == "__main__":
    app.run(host="0.0.0.0", debug=True)

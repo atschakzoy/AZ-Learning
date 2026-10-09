@@ -141,6 +141,58 @@ resource "azurerm_role_assignment" "staging_openai_user" {
   principal_id         = azurerm_linux_web_app_slot.staging.identity[0].principal_id
 }
 
+# --- Stage 8: Networking ---
+
+resource "azurerm_virtual_network" "main" {
+  name                = var.vnet_name
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  address_space       = ["10.0.0.0/16"]
+}
+
+resource "azurerm_network_security_group" "private_endpoints" {
+  name                = "nsg-private-endpoints"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+resource "azurerm_network_security_group" "app_service_integration" {
+  name                = "nsg-app-service-integration"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+resource "azurerm_subnet" "private_endpoints" {
+  name                 = "snet-private-endpoints"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.1.0/24"]
+}
+
+resource "azurerm_subnet_network_security_group_association" "private_endpoints" {
+  subnet_id                 = azurerm_subnet.private_endpoints.id
+  network_security_group_id = azurerm_network_security_group.private_endpoints.id
+}
+
+resource "azurerm_subnet" "app_service_integration" {
+  name                 = "snet-app-service-integration"
+  resource_group_name  = azurerm_resource_group.main.name
+  virtual_network_name = azurerm_virtual_network.main.name
+  address_prefixes     = ["10.0.2.0/24"]
+
+  delegation {
+    name = "delegation"
+    service_delegation {
+      name    = "Microsoft.Web/serverFarms"
+      actions = ["Microsoft.Network/virtualNetworks/subnets/action"]
+    }
+  }
+}
+
+resource "azurerm_subnet_network_security_group_association" "app_service_integration" {
+  subnet_id                 = azurerm_subnet.app_service_integration.id
+  network_security_group_id = azurerm_network_security_group.app_service_integration.id
+}
 
 
 # --- Stage 9: Containers (commented out for Stage 6 App Service) ---

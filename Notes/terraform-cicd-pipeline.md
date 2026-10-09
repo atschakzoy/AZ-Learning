@@ -1209,3 +1209,95 @@ GitHub Actions auto-discovers any `.yml` file in `.github/workflows/`. ADO does 
 
 ---
 
+## Azure Soft-Delete — What It Is and How to Handle It
+
+### What is soft-delete?
+When you delete certain Azure resources, Azure does **not** delete them immediately. Instead it "soft-deletes" them — keeps them in a recoverable state for a period of time. This means you can restore them if you deleted by accident.
+
+**Resources that soft-delete:**
+| Resource | Soft-delete period | Must purge before recreating? |
+|---|---|---|
+| Key Vault | 90 days (default) | Yes |
+| Azure OpenAI / Cognitive Services | 48 hours | Yes |
+| App Service, Storage, Resource Group | No soft-delete | No |
+
+### The problem this causes with Terraform
+If you deleted resources manually (via portal or CLI, not `terraform destroy`), Terraform still tries to recreate them. But Azure says:
+
+```
+409 Conflict: FlagMustBeSetForRestore — An existing resource has been soft-deleted.
+Purge it first or restore it.
+```
+
+Terraform cannot recreate a soft-deleted resource until it is fully purged.
+
+### How to check if a resource is still soft-deleted
+
+**Key Vault:**
+```bash
+az keyvault list-deleted --query "[].name" -o table
+```
+
+**Azure OpenAI / Cognitive Services:**
+```bash
+az cognitiveservices account list-deleted \
+  --query "[?name=='<your-resource-name>']" -o table
+```
+
+### How to purge soft-deleted resources
+
+**Key Vault:**
+```bash
+az keyvault purge \
+  --name <vault-name> \
+  --location <location>
+```
+
+**Azure OpenAI (note: use the location where OpenAI was deployed, not where your resource group is):**
+```bash
+az cognitiveservices account purge \
+  --name <account-name> \
+  --resource-group <resource-group-name> \
+  --location <openai-location>
+```
+
+> Always use `terraform destroy` to tear down resources — it avoids state divergence AND handles soft-delete cleanup correctly.
+
+### Common mistake
+OpenAI was deployed in `swedencentral` but the resource group is in `centralus`. The purge command needs the **OpenAI location** (`swedencentral`), not the resource group location. Using the wrong location silently fails.
+
+---
+
+## Manual Steps After Terraform Apply
+
+Terraform creates the infrastructure but some things must be done manually — things that require human secrets or self-referencing permissions.
+
+### 1 — Grant yourself Key Vault access
+Terraform sets `rbac_authorization_enabled = true` on Key Vault, which means access is controlled by Azure RBAC roles — not the old "access policies". Your own user account needs the **Key Vault Secrets Officer** role to read/write secrets.
+
+```bash
+az role assignment create \
+  --assignee "$(az ad signed-in-user show --query id -o tsv)" \
+  --role "Key Vault Secrets Officer" \
+  --scope "$(az keyvault show --name <vault-name> --resource-group <rg-name> --query id -o tsv)"
+```
+
+Why not put this in Terraform? Terraform would need to know your personal user object ID, which is not portable (it changes per person/environment).
+
+### 2 — Store the OpenAI API key in Key Vault
+The app reads the OpenAI key from Key Vault at runtime. Terraform cannot store it because it would appear in the state file as plaintext.
+
+```bash
+az keyvault secret set \
+  --vault-name "<vault-name>" \
+  --name "openai-api-key" \
+  --value "$(az cognitiveservices account keys list \
+    --name <openai-name> \
+    --resource-group <rg-name> \
+    --query key1 -o tsv)"
+```
+
+This command gets the OpenAI key automatically from Azure and stores it in Key Vault in one step — no copy-pasting the key value.
+
+---
+
