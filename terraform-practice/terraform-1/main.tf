@@ -27,6 +27,8 @@ resource "azurerm_key_vault" "main" {
   rbac_authorization_enabled = var.rbac_authorization_enabled
   tenant_id                  = data.azurerm_client_config.current.tenant_id
   sku_name                   = var.keyvault_sku_name
+  public_network_access_enabled = false ##added for the networking part
+
 }
 
 resource "azurerm_log_analytics_workspace" "main" {
@@ -41,6 +43,8 @@ resource "azurerm_cognitive_account" "main" {
   resource_group_name = azurerm_resource_group.main.name
   kind                = "OpenAI"
   sku_name            = "S0"
+  public_network_access_enabled = false #added for the netwroking part
+
 }
 
 resource "azurerm_cognitive_deployment" "main" {
@@ -73,6 +77,7 @@ resource "azurerm_linux_web_app" "main" {
   resource_group_name = azurerm_resource_group.main.name
   location            = azurerm_resource_group.main.location
   service_plan_id     = azurerm_service_plan.main.id
+  virtual_network_subnet_id = azurerm_subnet.app_service_integration.id  # ← added this for networking
 
   identity {
     type = "SystemAssigned"
@@ -91,6 +96,7 @@ resource "azurerm_linux_web_app" "main" {
     AZURE_OPENAI_DEPLOYMENT        = var.openai_deployment_name
     KEY_VAULT_URL                  = azurerm_key_vault.main.vault_uri
     SCM_DO_BUILD_DURING_DEPLOYMENT = "true"
+     WEBSITE_VNET_ROUTE_ALL         = "1"  # ← added this also for networking
   }
 }
 
@@ -194,6 +200,71 @@ resource "azurerm_subnet_network_security_group_association" "app_service_integr
   network_security_group_id = azurerm_network_security_group.app_service_integration.id
 }
 
+# Private DNS Zones
+resource "azurerm_private_dns_zone" "key_vault" {
+  name                = "privatelink.vaultcore.azure.net"
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+resource "azurerm_private_dns_zone" "openai" {
+  name                = "privatelink.openai.azure.com"
+  resource_group_name = azurerm_resource_group.main.name
+}
+
+# Link DNS zones to the VNet so resources inside can use them
+resource "azurerm_private_dns_zone_virtual_network_link" "key_vault" {
+  name                  = "link-kv"
+  resource_group_name   = azurerm_resource_group.main.name
+  private_dns_zone_name = azurerm_private_dns_zone.key_vault.name
+  virtual_network_id    = azurerm_virtual_network.main.id
+}
+
+resource "azurerm_private_dns_zone_virtual_network_link" "openai" {
+  name                  = "link-openai"
+  resource_group_name   = azurerm_resource_group.main.name
+  private_dns_zone_name = azurerm_private_dns_zone.openai.name
+  virtual_network_id    = azurerm_virtual_network.main.id
+}
+
+# Private Endpoint for Key Vault
+resource "azurerm_private_endpoint" "key_vault" {
+  name                = "pe-keyvault"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  subnet_id           = azurerm_subnet.private_endpoints.id
+
+  private_service_connection {
+    name                           = "psc-keyvault"
+    private_connection_resource_id = azurerm_key_vault.main.id
+    subresource_names              = ["vault"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "dns-group-kv"
+    private_dns_zone_ids = [azurerm_private_dns_zone.key_vault.id]
+  }
+}
+
+# Private Endpoint for Azure OpenAI
+resource "azurerm_private_endpoint" "openai" {
+  name                = "pe-openai"
+  location            = azurerm_resource_group.main.location
+  resource_group_name = azurerm_resource_group.main.name
+  subnet_id           = azurerm_subnet.private_endpoints.id
+
+  private_service_connection {
+    name                           = "psc-openai"
+    private_connection_resource_id = azurerm_cognitive_account.main.id
+    subresource_names              = ["account"]
+    is_manual_connection           = false
+  }
+
+  private_dns_zone_group {
+    name                 = "dns-group-openai"
+    private_dns_zone_ids = [azurerm_private_dns_zone.openai.id]
+  }
+}
 
 # --- Stage 9: Containers (commented out for Stage 6 App Service) ---
 # resource "azurerm_container_registry" "main" {

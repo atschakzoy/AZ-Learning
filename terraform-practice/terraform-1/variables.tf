@@ -66,6 +66,12 @@ variable "app_service_name" {
   description = "name of the App Service"
 }
 
+variable "vnet_name" {
+  type        = string
+  description = "name of the virtual network"
+}
+
+
 
 # --- Stage 9: Containers (commented out for Stage 6 App Service) ---
 # variable "acr_name" {
