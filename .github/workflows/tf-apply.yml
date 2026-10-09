@@ -6,6 +6,10 @@ on:
     paths:
       - 'terraform-practice/terraform-1/**'
 
+concurrency:
+  group: terraform
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read

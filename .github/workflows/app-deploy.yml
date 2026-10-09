@@ -6,6 +6,10 @@ on:
     paths:
       - 'App/**'
 
+concurrency:
+  group: app
+  cancel-in-progress: false
+
 permissions:
   id-token: write
   contents: read
